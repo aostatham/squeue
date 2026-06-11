@@ -32,6 +32,10 @@ public interface QueueRepository {
 
     void blockSource(String queueName, String sourceId, OffsetDateTime now);
 
+    int releaseSourceIfLeaseMatches(String queueName, String sourceId, UUID leaseId, String leasedBy, OffsetDateTime now);
+
+    int blockSourceIfLeaseMatches(String queueName, String sourceId, UUID leaseId, String leasedBy, OffsetDateTime now);
+
     int heartbeat(String queueName, UUID leaseId, String workerId, OffsetDateTime leaseUntil, OffsetDateTime now);
 
     List<SourceStateRow> blockedSources(String queueName);
@@ -41,6 +45,10 @@ public interface QueueRepository {
     QueueItemRow adminStatus(UUID itemId, ItemStatus status, OffsetDateTime availableAt, OffsetDateTime now);
 
     Optional<QueueItemRow> skipDeadLetteredHead(String queueName, String sourceId, OffsetDateTime now);
+
+    Optional<QueueItemRow> findHeadBlockingItem(String queueName, String sourceId);
+
+    int blockDeadLetteredHeadSources(String queueName, OffsetDateTime now);
 
     List<QueueItemRow> expiredProcessing(OffsetDateTime now, int limit);
 

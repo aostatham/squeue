@@ -36,7 +36,16 @@ public class DefaultQueueService implements QueueOperations {
 
     @Override
     public EnqueueResponse enqueue(String queueName, EnqueueRequest request) {
-        return transactions.inTransaction(() -> enqueueInTransaction(queueName, request));
+        try {
+            return transactions.inTransaction(() -> enqueueInTransaction(queueName, request));
+        } catch (DuplicateIdempotencyKeyException e) {
+            if (request == null || request.idempotencyKey() == null || request.idempotencyKey().isBlank()) {
+                throw e;
+            }
+            return transactions.inTransaction(() -> repository.findByIdempotencyKey(queueName, request.idempotencyKey())
+                .map(this::toEnqueueResponse)
+                .orElseThrow(() -> e));
+        }
     }
 
     @Override
@@ -92,7 +101,10 @@ public class DefaultQueueService implements QueueOperations {
     public SourceResponse unblockSource(String queueName, String sourceId) {
         return transactions.inTransaction(() -> {
             OffsetDateTime now = now();
-            repository.lockSource(queueName, sourceId);
+            SourceStateRow source = repository.lockSource(queueName, sourceId);
+            if (source.status() != SourceStatus.blocked) {
+                throw new QueueException(QueueException.CONFLICT, "source is not blocked");
+            }
             repository.skipDeadLetteredHead(queueName, sourceId, now);
             repository.releaseSource(queueName, sourceId, now);
             return toSourceResponse(repository.findSource(queueName, sourceId));
@@ -103,6 +115,7 @@ public class DefaultQueueService implements QueueOperations {
     public ItemResponse retry(String queueName, UUID itemId) {
         return transactions.inTransaction(() -> {
             QueueItemRow item = repository.lockItem(queueName, itemId);
+            ensureAdminRepairAllowed(item, List.of(ItemStatus.dead_lettered));
             QueueItemRow updated = repository.adminStatus(item.itemId(), ItemStatus.retry_wait, now(), now());
             repository.releaseSource(item.queueName(), item.sourceId(), now());
             return toItemResponse(updated);
@@ -113,6 +126,7 @@ public class DefaultQueueService implements QueueOperations {
     public ItemResponse skip(String queueName, UUID itemId) {
         return transactions.inTransaction(() -> {
             QueueItemRow item = repository.lockItem(queueName, itemId);
+            ensureAdminRepairAllowed(item, List.of(ItemStatus.pending, ItemStatus.retry_wait, ItemStatus.dead_lettered));
             QueueItemRow updated = repository.adminStatus(item.itemId(), ItemStatus.skipped, now(), now());
             repository.releaseSource(item.queueName(), item.sourceId(), now());
             return toItemResponse(updated);
@@ -123,6 +137,7 @@ public class DefaultQueueService implements QueueOperations {
     public ItemResponse cancel(String queueName, UUID itemId) {
         return transactions.inTransaction(() -> {
             QueueItemRow item = repository.lockItem(queueName, itemId);
+            ensureAdminRepairAllowed(item, List.of(ItemStatus.pending, ItemStatus.retry_wait, ItemStatus.dead_lettered));
             QueueItemRow updated = repository.adminStatus(item.itemId(), ItemStatus.cancelled, now(), now());
             repository.releaseSource(item.queueName(), item.sourceId(), now());
             return toItemResponse(updated);
@@ -137,10 +152,10 @@ public class DefaultQueueService implements QueueOperations {
                 boolean exhausted = item.attemptCount() >= item.maxAttempts();
                 if (exhausted) {
                     repository.fail(item.itemId(), ItemStatus.dead_lettered, now, "LEASE_EXPIRED", "Worker lease expired", now);
-                    repository.blockSource(item.queueName(), item.sourceId(), now);
+                    repository.blockSourceIfLeaseMatches(item.queueName(), item.sourceId(), item.leaseId(), item.claimedBy(), now);
                 } else {
                     repository.fail(item.itemId(), ItemStatus.retry_wait, now.plus(retryPolicy.nextBackoff(item.attemptCount())), "LEASE_EXPIRED", "Worker lease expired", now);
-                    repository.releaseSource(item.queueName(), item.sourceId(), now);
+                    repository.releaseSourceIfLeaseMatches(item.queueName(), item.sourceId(), item.leaseId(), item.claimedBy(), now);
                 }
             }
         });
@@ -164,6 +179,10 @@ public class DefaultQueueService implements QueueOperations {
         OffsetDateTime now = now();
         repository.ensureSource(queueName, request.sourceId(), now);
         SourceStateRow source = repository.lockSource(queueName, request.sourceId());
+        existing = repository.findByIdempotencyKey(queueName, request.idempotencyKey());
+        if (existing.isPresent()) {
+            return toEnqueueResponse(existing.get());
+        }
         long sequenceNo = source.nextSequenceNo();
         repository.incrementNextSequence(queueName, request.sourceId(), now);
 
@@ -181,6 +200,7 @@ public class DefaultQueueService implements QueueOperations {
             throw new QueueException(QueueException.BAD_REQUEST, "MVP supports maxItems <= 1");
         }
 
+        repository.blockDeadLetteredHeadSources(queueName, now());
         UUID leaseId = UUID.randomUUID();
         int leaseSeconds = request.leaseSeconds() == null ? defaultLeaseSeconds : request.leaseSeconds();
         OffsetDateTime leaseUntil = now().plusSeconds(leaseSeconds);
@@ -235,6 +255,21 @@ public class DefaultQueueService implements QueueOperations {
             throw new QueueException(QueueException.CONFLICT, "source lease is not held by worker");
         }
         return item;
+    }
+
+    private void ensureAdminRepairAllowed(QueueItemRow item, List<ItemStatus> allowedStatuses) {
+        if (!allowedStatuses.contains(item.status())) {
+            throw new QueueException(QueueException.CONFLICT, "admin repair is not allowed for item status " + item.status());
+        }
+        SourceStateRow source = repository.lockSource(item.queueName(), item.sourceId());
+        if (source.status() == SourceStatus.leased) {
+            throw new QueueException(QueueException.CONFLICT, "admin repair cannot modify an actively leased source");
+        }
+        QueueItemRow head = repository.findHeadBlockingItem(item.queueName(), item.sourceId())
+            .orElseThrow(() -> new QueueException(QueueException.CONFLICT, "source has no blocking head item"));
+        if (!head.itemId().equals(item.itemId())) {
+            throw new QueueException(QueueException.CONFLICT, "admin repair item is not the source head item");
+        }
     }
 
     private EnqueueResponse toEnqueueResponse(QueueItemRow item) {

@@ -50,14 +50,28 @@ public class PostgresQueueRepository implements QueueRepository {
 
     @Override
     public QueueItemRow insertItem(UUID itemId, String queueName, String sourceId, long sequenceNo, String itemType, String payloadJson, String headersJson, OffsetDateTime availableAt, int maxAttempts, String idempotencyKey, OffsetDateTime now) {
-        return queryOne("""
+        String sql = """
             INSERT INTO queue_item (
                 item_id, queue_name, source_id, sequence_no, item_type, payload_json, headers_json,
                 status, available_at, max_attempts, idempotency_key, created_at, updated_at
             )
             VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb), 'pending', ?, ?, ?, ?, ?)
             RETURNING *
-            """, this::mapItem, itemId, queueName, sourceId, sequenceNo, itemType, payloadJson, headersJson, availableAt, maxAttempts, idempotencyKey, now, now);
+            """;
+        try (PreparedStatement statement = connection().prepareStatement(sql)) {
+            bind(statement, itemId, queueName, sourceId, sequenceNo, itemType, payloadJson, headersJson, availableAt, maxAttempts, idempotencyKey, now, now);
+            try (ResultSet rs = statement.executeQuery()) {
+                if (!rs.next()) {
+                    throw new QueueException(QueueException.INTERNAL_SERVER_ERROR, "insert did not return queue item");
+                }
+                return mapItem(rs);
+            }
+        } catch (SQLException e) {
+            if ("23505".equals(e.getSQLState()) && idempotencyKey != null) {
+                throw new DuplicateIdempotencyKeyException("idempotency key already exists for queueName=" + queueName, e);
+            }
+            throw new QueueException(QueueException.INTERNAL_SERVER_ERROR, "database insert failed", e);
+        }
     }
 
     @Override
@@ -99,7 +113,7 @@ public class PostgresQueueRepository implements QueueRepository {
                     FROM queue_item i
                     WHERE i.queue_name = s.queue_name
                       AND i.source_id = s.source_id
-                      AND i.status NOT IN ('succeeded', 'cancelled', 'skipped')
+                      AND i.status NOT IN ('succeeded', 'cancelled', 'skipped', 'failed')
                     ORDER BY i.sequence_no
                     LIMIT 1
                 ) head ON true
@@ -233,17 +247,35 @@ public class PostgresQueueRepository implements QueueRepository {
     }
 
     @Override
+    public int releaseSourceIfLeaseMatches(String queueName, String sourceId, UUID leaseId, String leasedBy, OffsetDateTime now) {
+        return update("""
+            UPDATE queue_source_state
+            SET status = 'idle', leased_by = NULL, lease_id = NULL, lease_until = NULL, updated_at = ?
+            WHERE queue_name = ? AND source_id = ? AND lease_id = ? AND leased_by = ?
+            """, now, queueName, sourceId, leaseId, leasedBy);
+    }
+
+    @Override
+    public int blockSourceIfLeaseMatches(String queueName, String sourceId, UUID leaseId, String leasedBy, OffsetDateTime now) {
+        return update("""
+            UPDATE queue_source_state
+            SET status = 'blocked', leased_by = NULL, lease_id = NULL, lease_until = NULL, updated_at = ?
+            WHERE queue_name = ? AND source_id = ? AND lease_id = ? AND leased_by = ?
+            """, now, queueName, sourceId, leaseId, leasedBy);
+    }
+
+    @Override
     public int heartbeat(String queueName, UUID leaseId, String workerId, OffsetDateTime leaseUntil, OffsetDateTime now) {
         int sources = update("""
             UPDATE queue_source_state
             SET lease_until = ?, updated_at = ?
-            WHERE queue_name = ? AND lease_id = ? AND leased_by = ? AND status = 'leased'
-            """, leaseUntil, now, queueName, leaseId, workerId);
+            WHERE queue_name = ? AND lease_id = ? AND leased_by = ? AND status = 'leased' AND lease_until > ?
+            """, leaseUntil, now, queueName, leaseId, workerId, now);
         int items = update("""
             UPDATE queue_item
             SET lease_until = ?, updated_at = ?
-            WHERE queue_name = ? AND lease_id = ? AND claimed_by = ? AND status = 'processing'
-            """, leaseUntil, now, queueName, leaseId, workerId);
+            WHERE queue_name = ? AND lease_id = ? AND claimed_by = ? AND status = 'processing' AND lease_until > ?
+            """, leaseUntil, now, queueName, leaseId, workerId, now);
         return Math.min(sources, items);
     }
 
@@ -295,13 +327,55 @@ public class PostgresQueueRepository implements QueueRepository {
                 FROM queue_item head
                 WHERE head.queue_name = ?
                   AND head.source_id = ?
-                  AND head.status NOT IN ('succeeded', 'cancelled', 'skipped')
+                  AND head.status NOT IN ('succeeded', 'cancelled', 'skipped', 'failed')
                 ORDER BY head.sequence_no
                 LIMIT 1
             )
             AND i.status = 'dead_lettered'
             RETURNING i.*
             """, this::mapItem, now, queueName, sourceId).stream().findFirst();
+    }
+
+    @Override
+    public Optional<QueueItemRow> findHeadBlockingItem(String queueName, String sourceId) {
+        return query("""
+            SELECT *
+            FROM queue_item
+            WHERE queue_name = ?
+              AND source_id = ?
+              AND status NOT IN ('succeeded', 'cancelled', 'skipped', 'failed')
+            ORDER BY sequence_no
+            LIMIT 1
+            FOR UPDATE
+            """, this::mapItem, queueName, sourceId).stream().findFirst();
+    }
+
+    @Override
+    public int blockDeadLetteredHeadSources(String queueName, OffsetDateTime now) {
+        return update("""
+            UPDATE queue_source_state s
+            SET status = 'blocked',
+                leased_by = NULL,
+                lease_id = NULL,
+                lease_until = NULL,
+                updated_at = ?
+            WHERE s.queue_name = ?
+              AND s.status = 'idle'
+              AND EXISTS (
+                SELECT 1
+                FROM queue_item head
+                WHERE head.item_id = (
+                  SELECT i.item_id
+                  FROM queue_item i
+                  WHERE i.queue_name = s.queue_name
+                    AND i.source_id = s.source_id
+                    AND i.status NOT IN ('succeeded', 'cancelled', 'skipped', 'failed')
+                  ORDER BY i.sequence_no
+                  LIMIT 1
+                )
+                AND head.status = 'dead_lettered'
+              )
+            """, now, queueName);
     }
 
     @Override
