@@ -2,7 +2,7 @@ package com.example.sequencedqueue.server.api;
 
 import java.util.Map;
 
-import com.example.sequencedqueue.server.core.QueueException;
+import com.sequencedqueue.core.QueueException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;

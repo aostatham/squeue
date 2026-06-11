@@ -12,9 +12,10 @@ Items for different `sourceId` values may be processed concurrently.
 
 ## Modules
 
-- `sequenced-queue-server`: Spring Boot HTTP server, PostgreSQL persistence, Flyway schema, leases, retries, dead-letter handling, and admin repair endpoints.
+- `sequenced-queue-core`: shared queue implementation, plain JDBC PostgreSQL repository, transaction abstraction, leases, retries, dead-letter handling, and admin repair semantics.
+- `sequenced-queue-server`: Spring Boot HTTP adapter, Flyway schema, and OpenAPI surface over `sequenced-queue-core`.
 - `sequenced-queue-java-client`: Java HTTP client and polling worker helper.
-- `clients/java-postgres`: trusted/internal Java PostgreSQL client for direct DataSource-based enqueue access.
+- `clients/java-direct`: trusted/internal Java PostgreSQL adapter that uses the same `sequenced-queue-core` implementation through a caller-provided `DataSource`.
 - `sequenced-queue-python-client`: Python HTTP client and polling worker helper.
 - `docs/openapi.yaml`: MVP HTTP API description.
 
@@ -55,8 +56,8 @@ python -m pytest
 
 Consumers must use idempotent handlers because worker crashes can cause duplicate delivery.
 
-## Direct Java PostgreSQL Client
+## Direct Java Client
 
-The direct Java PostgreSQL client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It uses the same schema and enqueue semantics as the server path, but bypasses API-layer security and should use a least-privilege database role.
+The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
 
 Current support: `enqueue(queueName, EnqueueRequest)`, idempotency handling, per-source sequence assignment, and schema version lookup. This client version supports schema migration `V1`.

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.time.Duration;
 
+import com.sequencedqueue.core.RetryPolicy;
 import org.junit.jupiter.api.Test;
 
 class RetryPolicyTest {

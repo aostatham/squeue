@@ -9,9 +9,10 @@
   <packaging>pom</packaging>
 
   <modules>
+    <module>sequenced-queue-core</module>
     <module>sequenced-queue-server</module>
     <module>sequenced-queue-java-client</module>
-    <module>clients/java-postgres</module>
+    <module>clients/java-direct</module>
   </modules>
 
   <properties>

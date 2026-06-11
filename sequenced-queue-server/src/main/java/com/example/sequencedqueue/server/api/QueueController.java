@@ -1,6 +1,6 @@
 package com.example.sequencedqueue.server.api;
 
-import static com.example.sequencedqueue.server.api.ApiDtos.*;
+import static com.sequencedqueue.core.QueueDtos.*;
 
 import java.util.List;
 import java.util.UUID;

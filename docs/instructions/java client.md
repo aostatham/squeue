@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Add a direct Java → SQL → PostgreSQL client for `sequenced-queue`.
+Add a direct Java → SQL → direct client for `sequenced-queue`.
 
 This client exists alongside the REST clients.
 
@@ -24,7 +24,7 @@ Different sources may be processed concurrently.
 
 The REST client is the default external integration mechanism.
 
-The direct Java PostgreSQL client exists for trusted internal deployments where:
+The direct Java direct client exists for trusted internal deployments where:
 
 * workers are Java-based;
 * workers are deployed close to PostgreSQL;
@@ -74,7 +74,7 @@ There will be three supported access modes:
 2. Embedded Java service mode
    Same JVM code → QueueService → PostgreSQL
 
-3. Direct Java PostgreSQL client
+3. Direct Java direct client
    Java worker → JDBC/DataSource → PostgreSQL
 ```
 
@@ -94,20 +94,20 @@ sequenced-queue/
   core/
   clients/
     java-rest/
-    java-postgres/
+    java-direct/
     python-rest/
 ```
 
 The new module should be:
 
 ```text
-clients/java-postgres
+clients/java-direct
 ```
 
 Suggested package:
 
 ```text
-com.sequencedqueue.postgres
+com.sequencedqueue.direct
 ```
 
 If a shared Java domain module already exists, reuse it:
@@ -128,7 +128,7 @@ The direct client should avoid duplicating DTOs where possible.
 
 ## 6. Critical design rule
 
-The direct Java PostgreSQL client must share the same core SQL semantics as the server.
+The direct Java direct client must share the same core SQL semantics as the server.
 
 Preferred design:
 
@@ -142,7 +142,7 @@ Avoid this:
 
 ```text
 server has one SQL implementation
-java-postgres-client has a copied second SQL implementation
+java-direct-client has a copied second SQL implementation
 ```
 
 If full sharing is difficult, the direct client may initially duplicate SQL, but every duplicated SQL path must be covered by the same integration test contract as the server.
@@ -156,8 +156,8 @@ The client should be constructed from a `javax.sql.DataSource`.
 Example:
 
 ```java
-SequencedQueuePostgresClient client =
-    SequencedQueuePostgresClient.builder()
+SequencedQueueDirectClient client =
+    SequencedQueueDirectClient.builder()
         .dataSource(dataSource)
         .defaultQueueName("wf.commands")
         .workerId("notification-worker-1")
@@ -279,7 +279,7 @@ Provide a worker loop wrapper similar to the REST Java worker.
 Example:
 
 ```java
-SequencedQueuePostgresWorker worker = client.worker("wf.commands")
+SequencedQueueDirectWorker worker = client.worker("wf.commands")
     .workerId("notification-worker-1")
     .supports("wf.command")
     .leaseSeconds(60)
@@ -692,7 +692,7 @@ If using Jackson, provide `JsonNode` overloads.
 
 ## 24. Performance requirements
 
-Direct PostgreSQL client is expected to outperform REST for small items by avoiding:
+Direct direct client is expected to outperform REST for small items by avoiding:
 
 ```text
 HTTP request/response overhead
@@ -821,7 +821,7 @@ recoverExpiredLeases makes item retryable
 
 ## 28. Security warning
 
-The direct Java PostgreSQL client bypasses the REST server’s API-level security.
+The direct Java direct client bypasses the REST server’s API-level security.
 
 Therefore:
 
@@ -898,7 +898,7 @@ Direct client should fail fast if schema is older than required.
 
 ### Phase JP-1 — Module skeleton
 
-Create `clients/java-postgres`.
+Create `clients/java-direct`.
 
 Add:
 
@@ -980,15 +980,15 @@ schema compatibility note
 
 ## 32. Codex first task
 
-Start with the direct Java PostgreSQL client skeleton and enqueue support only.
+Start with the direct Java direct client skeleton and enqueue support only.
 
 First task:
 
 ```text
-Create clients/java-postgres module.
+Create clients/java-direct module.
 
 Implement:
-- SequencedQueuePostgresClient
+- SequencedQueueDirectClient
 - DataSource-based configuration
 - enqueue(queueName, EnqueueRequest)
 - idempotency handling
@@ -1004,7 +1004,7 @@ Do not implement claim/complete until enqueue is proven correct.
 
 ## 33. Acceptance criteria
 
-The direct Java PostgreSQL client is acceptable when:
+The direct Java direct client is acceptable when:
 
 1. It uses a caller-provided `DataSource`.
 2. It does not require the REST server to run.
@@ -1022,7 +1022,7 @@ The direct Java PostgreSQL client is acceptable when:
 
 ## 34. Final design statement
 
-The direct Java PostgreSQL client is a trusted high-performance access path for `sequenced-queue`.
+The direct Java direct client is a trusted high-performance access path for `sequenced-queue`.
 
 It must remain semantically identical to the REST server path.
 
