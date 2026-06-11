@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: sequenced-queue-server
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/sequenced_queue}
+    username: ${DATABASE_USERNAME:sequenced_queue}
+    password: ${DATABASE_PASSWORD:sequenced_queue}
+  flyway:
+    enabled: true
+server:
+  port: ${PORT:8080}
+sequenced-queue:
+  default-lease-seconds: 60
+  default-max-attempts: 5

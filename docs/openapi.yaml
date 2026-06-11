@@ -1,0 +1,294 @@
+openapi: 3.0.3
+info:
+  title: sequenced-queue API
+  version: 0.1.0
+paths:
+  /queues/{queueName}/items:
+    post:
+      summary: Enqueue an item
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnqueueRequest"
+      responses:
+        "200":
+          description: Enqueued or existing idempotent item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnqueueResponse"
+  /queues/{queueName}/claims:
+    post:
+      summary: Claim the head item for one available source
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimRequest"
+      responses:
+        "200":
+          description: Claim result, empty when no item is available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimResponse"
+  /queues/{queueName}/items/{itemId}/complete:
+    post:
+      summary: Complete a leased item
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteRequest"
+      responses:
+        "200":
+          description: Completed item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+  /queues/{queueName}/items/{itemId}/fail:
+    post:
+      summary: Fail a leased item
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FailRequest"
+      responses:
+        "200":
+          description: Failed, retry scheduled, or dead-lettered item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+  /queues/{queueName}/leases/{leaseId}/heartbeat:
+    post:
+      summary: Extend a worker lease
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - name: leaseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HeartbeatRequest"
+      responses:
+        "204":
+          description: Lease extended
+  /queues/{queueName}/sources/{sourceId}/items:
+    get:
+      summary: List source items in sequence order
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Source items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ItemResponse"
+  /queues/{queueName}/items/{itemId}:
+    get:
+      summary: Get one item
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+  /admin/queues/{queueName}/blocked-sources:
+    get:
+      summary: List blocked sources
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+      responses:
+        "200":
+          description: Blocked sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SourceResponse"
+  /admin/queues/{queueName}/items/{itemId}/retry:
+    post:
+      summary: Retry a failed or dead-lettered item
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Retried item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+  /admin/queues/{queueName}/items/{itemId}/skip:
+    post:
+      summary: Skip an item to unblock its source
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Skipped item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+  /admin/queues/{queueName}/items/{itemId}/cancel:
+    post:
+      summary: Cancel an item
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Cancelled item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+  /admin/queues/{queueName}/sources/{sourceId}/unblock:
+    post:
+      summary: Skip a dead-lettered head item and unblock a source
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Unblocked source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceResponse"
+components:
+  parameters:
+    QueueName:
+      name: queueName
+      in: path
+      required: true
+      schema:
+        type: string
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    EnqueueRequest:
+      type: object
+      required: [sourceId, itemType]
+      properties:
+        sourceId: { type: string }
+        itemType: { type: string }
+        idempotencyKey: { type: string, nullable: true }
+        payload: { type: object, additionalProperties: true }
+        headers: { type: object, additionalProperties: true }
+        availableAt: { type: string, format: date-time, nullable: true }
+        maxAttempts: { type: integer, nullable: true }
+    EnqueueResponse:
+      type: object
+      properties:
+        itemId: { type: string, format: uuid }
+        queueName: { type: string }
+        sourceId: { type: string }
+        sequenceNo: { type: integer, format: int64 }
+        status: { type: string }
+    ClaimRequest:
+      type: object
+      required: [workerId, supportedItemTypes]
+      properties:
+        workerId: { type: string }
+        supportedItemTypes:
+          type: array
+          items: { type: string }
+        leaseSeconds: { type: integer, default: 60 }
+        maxItems: { type: integer, default: 1 }
+    ClaimResponse:
+      type: object
+      properties:
+        leaseId: { type: string, format: uuid, nullable: true }
+        queueName: { type: string, nullable: true }
+        sourceId: { type: string, nullable: true }
+        leaseUntil: { type: string, format: date-time, nullable: true }
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClaimItem"
+    ClaimItem:
+      type: object
+      properties:
+        itemId: { type: string, format: uuid }
+        sequenceNo: { type: integer, format: int64 }
+        itemType: { type: string }
+        payload: { type: object, additionalProperties: true }
+        headers: { type: object, additionalProperties: true }
+    CompleteRequest:
+      type: object
+      required: [workerId, leaseId]
+      properties:
+        workerId: { type: string }
+        leaseId: { type: string, format: uuid }
+        result: { type: object, additionalProperties: true }
+    FailRequest:
+      type: object
+      required: [workerId, leaseId, retryable]
+      properties:
+        workerId: { type: string }
+        leaseId: { type: string, format: uuid }
+        retryable: { type: boolean }
+        errorType: { type: string }
+        errorMessage: { type: string }
+        backoffSeconds: { type: integer, nullable: true }
+    HeartbeatRequest:
+      type: object
+      required: [workerId]
+      properties:
+        workerId: { type: string }
+        extendBySeconds: { type: integer, default: 60 }
+    ItemResponse:
+      type: object
+      additionalProperties: true
+    SourceResponse:
+      type: object
+      additionalProperties: true
