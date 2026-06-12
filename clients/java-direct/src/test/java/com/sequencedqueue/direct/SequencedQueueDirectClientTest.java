@@ -4,8 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.PrintWriter;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -23,6 +21,7 @@ import java.util.logging.Logger;
 
 import javax.sql.DataSource;
 
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +29,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class SequencedQueueDirectClientTest {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -45,6 +44,7 @@ class SequencedQueueDirectClientTest {
         client = SequencedQueueDirectClient.builder()
             .dataSource(dataSource)
             .defaultQueueName("wf.commands")
+            .validateSchemaOnBuild(true)
             .build();
     }
 
@@ -186,16 +186,17 @@ class SequencedQueueDirectClientTest {
         assertEquals(2, next.items().getFirst().sequenceNo());
     }
 
+    @Test
+    void directClientReadsFlywaySchemaVersion() {
+        assertEquals("1", client.getSchemaInfo().schemaVersion());
+    }
+
     private static void applySchema(DataSource dataSource) throws Exception {
-        Path migrationPath = Path.of("sequenced-queue-core/src/main/resources/db/migration/V1__initial_queue_schema.sql");
-        if (!Files.exists(migrationPath)) {
-            migrationPath = Path.of("../../sequenced-queue-core/src/main/resources/db/migration/V1__initial_queue_schema.sql");
-        }
-        String migration = Files.readString(migrationPath);
-        try (Connection connection = dataSource.getConnection();
-             Statement statement = connection.createStatement()) {
-            statement.execute(migration);
-        }
+        Flyway.configure()
+            .dataSource(dataSource)
+            .locations("classpath:db/migration")
+            .load()
+            .migrate();
     }
 
     private static void execute(String sql) throws Exception {

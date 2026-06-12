@@ -23,38 +23,38 @@ public class QueueController {
     }
 
     @PostMapping("/items")
-    public EnqueueResponse enqueue(@PathVariable String queueName, @RequestBody EnqueueRequest request) {
+    public EnqueueResponse enqueue(@PathVariable("queueName") String queueName, @RequestBody EnqueueRequest request) {
         return service.enqueue(queueName, request);
     }
 
     @PostMapping("/claims")
-    public ClaimResponse claim(@PathVariable String queueName, @RequestBody ClaimRequest request) {
+    public ClaimResponse claim(@PathVariable("queueName") String queueName, @RequestBody ClaimRequest request) {
         return service.claim(queueName, request);
     }
 
     @PostMapping("/items/{itemId}/complete")
-    public ItemResponse complete(@PathVariable String queueName, @PathVariable UUID itemId, @RequestBody CompleteRequest request) {
+    public ItemResponse complete(@PathVariable("queueName") String queueName, @PathVariable("itemId") UUID itemId, @RequestBody CompleteRequest request) {
         return service.complete(queueName, itemId, request);
     }
 
     @PostMapping("/items/{itemId}/fail")
-    public ItemResponse fail(@PathVariable String queueName, @PathVariable UUID itemId, @RequestBody FailRequest request) {
+    public ItemResponse fail(@PathVariable("queueName") String queueName, @PathVariable("itemId") UUID itemId, @RequestBody FailRequest request) {
         return service.fail(queueName, itemId, request);
     }
 
     @PostMapping("/leases/{leaseId}/heartbeat")
-    public ResponseEntity<Void> heartbeat(@PathVariable String queueName, @PathVariable UUID leaseId, @RequestBody HeartbeatRequest request) {
+    public ResponseEntity<Void> heartbeat(@PathVariable("queueName") String queueName, @PathVariable("leaseId") UUID leaseId, @RequestBody HeartbeatRequest request) {
         service.heartbeat(queueName, leaseId, request);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/sources/{sourceId}/items")
-    public List<ItemResponse> sourceItems(@PathVariable String queueName, @PathVariable String sourceId) {
+    public List<ItemResponse> sourceItems(@PathVariable("queueName") String queueName, @PathVariable("sourceId") String sourceId) {
         return service.getSourceItems(queueName, sourceId);
     }
 
     @GetMapping("/items/{itemId}")
-    public ItemResponse item(@PathVariable String queueName, @PathVariable UUID itemId) {
+    public ItemResponse item(@PathVariable("queueName") String queueName, @PathVariable("itemId") UUID itemId) {
         return service.getItem(queueName, itemId);
     }
 }

@@ -385,7 +385,6 @@ public class PostgresQueueRepository implements QueueRepository {
             WHERE status = 'processing' AND lease_until < ?
             ORDER BY lease_until
             LIMIT ?
-            FOR UPDATE SKIP LOCKED
             """, this::mapItem, now, limit);
     }
 

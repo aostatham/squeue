@@ -1,6 +1,7 @@
 package com.example.sequencedqueue.server.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -24,7 +25,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ApiKeySecurityTest {
     private static final String QUEUE = "wf.commands";
@@ -79,6 +80,11 @@ class ApiKeySecurityTest {
         ResponseEntity<Map[]> response = get("/admin/queues/" + QUEUE + "/blocked-sources", Map[].class, bearer("dev-admin-key"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    void equalApiKeysAreRejected() {
+        assertThrows(IllegalArgumentException.class, () -> new ApiKeyFilter("same-key", "same-key"));
     }
 
     private <T> ResponseEntity<T> post(String path, Object body, Class<T> responseType, HttpHeaders headers) {

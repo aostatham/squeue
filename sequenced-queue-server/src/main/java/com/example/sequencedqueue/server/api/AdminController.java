@@ -21,27 +21,27 @@ public class AdminController {
     }
 
     @GetMapping("/blocked-sources")
-    public List<SourceResponse> blockedSources(@PathVariable String queueName) {
+    public List<SourceResponse> blockedSources(@PathVariable("queueName") String queueName) {
         return service.blockedSources(queueName);
     }
 
     @PostMapping("/items/{itemId}/retry")
-    public ItemResponse retry(@PathVariable String queueName, @PathVariable UUID itemId) {
+    public ItemResponse retry(@PathVariable("queueName") String queueName, @PathVariable("itemId") UUID itemId) {
         return service.retry(queueName, itemId);
     }
 
     @PostMapping("/items/{itemId}/skip")
-    public ItemResponse skip(@PathVariable String queueName, @PathVariable UUID itemId) {
+    public ItemResponse skip(@PathVariable("queueName") String queueName, @PathVariable("itemId") UUID itemId) {
         return service.skip(queueName, itemId);
     }
 
     @PostMapping("/items/{itemId}/cancel")
-    public ItemResponse cancel(@PathVariable String queueName, @PathVariable UUID itemId) {
+    public ItemResponse cancel(@PathVariable("queueName") String queueName, @PathVariable("itemId") UUID itemId) {
         return service.cancel(queueName, itemId);
     }
 
     @PostMapping("/sources/{sourceId}/unblock")
-    public SourceResponse unblockSource(@PathVariable String queueName, @PathVariable String sourceId) {
+    public SourceResponse unblockSource(@PathVariable("queueName") String queueName, @PathVariable("sourceId") String sourceId) {
         return service.unblockSource(queueName, sourceId);
     }
 }

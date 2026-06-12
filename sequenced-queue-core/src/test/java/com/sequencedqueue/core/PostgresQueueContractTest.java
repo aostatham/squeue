@@ -8,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.PrintWriter;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -26,11 +24,13 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import javax.sql.DataSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class PostgresQueueContractTest {
     private static final String QUEUE = "wf.commands";
 
@@ -314,6 +314,21 @@ class PostgresQueueContractTest {
     }
 
     @Test
+    void recoverExpiredLeaseDoesNotMutateItemWhenSourceLeaseDoesNotMatch() throws Exception {
+        enqueue("source-1");
+        ClaimResponse claim = claim("worker-1");
+        UUID mismatchedLease = UUID.randomUUID();
+        execute("UPDATE queue_item SET lease_until = now() - interval '1 second'");
+        execute("UPDATE queue_source_state SET lease_id = '" + mismatchedLease + "', leased_by = 'other-worker', lease_until = now() - interval '1 second'");
+
+        queue.recoverExpiredLeases();
+
+        assertEquals("processing", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+        assertEquals(claim.leaseId().toString(), scalar("SELECT lease_id::text FROM queue_item WHERE sequence_no = 1"));
+        assertEquals(mismatchedLease.toString(), scalar("SELECT lease_id::text FROM queue_source_state WHERE source_id = 'source-1'"));
+    }
+
+    @Test
     void adminSkipDeadLetteredHeadUnblocksSource() throws Exception {
         enqueue("source-1", 1);
         enqueue("source-1");
@@ -339,6 +354,25 @@ class PostgresQueueContractTest {
         assertEquals("processing", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
     }
 
+    @Test
+    void claimAndAdminSkipSamePendingHeadDoNotDeadlock() throws Exception {
+        UUID itemId = enqueue("source-1").itemId();
+
+        raceClaimWithAdminRepair(itemId, "skipped", id -> queue.skip(QUEUE, id));
+    }
+
+    @Test
+    void claimAndAdminCancelSamePendingHeadDoNotDeadlock() throws Exception {
+        UUID itemId = enqueue("source-1").itemId();
+
+        raceClaimWithAdminRepair(itemId, "cancelled", id -> queue.cancel(QUEUE, id));
+    }
+
+    @Test
+    void schemaInfoReportsFlywayVersion() {
+        assertEquals("1", queue.getSchemaInfo().schemaVersion());
+    }
+
     private EnqueueResponse enqueue(String sourceId) {
         return enqueue(sourceId, 5);
     }
@@ -356,13 +390,46 @@ class PostgresQueueContractTest {
     }
 
     private static void applySchema(DataSource dataSource) throws Exception {
-        Path migrationPath = Path.of("sequenced-queue-core/src/main/resources/db/migration/V1__initial_queue_schema.sql");
-        if (!Files.exists(migrationPath)) {
-            migrationPath = Path.of("../sequenced-queue-core/src/main/resources/db/migration/V1__initial_queue_schema.sql");
-        }
-        String migration = Files.readString(migrationPath);
-        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(migration);
+        Flyway.configure()
+            .dataSource(dataSource)
+            .locations("classpath:db/migration")
+            .load()
+            .migrate();
+    }
+
+    private void raceClaimWithAdminRepair(UUID itemId, String terminalStatus, AdminRepair repair) throws Exception {
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var claimFuture = executor.submit(() -> {
+                start.await();
+                return claim("race-worker");
+            });
+            var adminFuture = executor.submit(() -> {
+                start.await();
+                try {
+                    return repair.apply(itemId).status();
+                } catch (QueueException e) {
+                    assertEquals(QueueException.CONFLICT, e.statusCode());
+                    return "conflict";
+                }
+            });
+
+            start.countDown();
+            ClaimResponse claim = claimFuture.get(5, TimeUnit.SECONDS);
+            String adminResult = adminFuture.get(5, TimeUnit.SECONDS);
+            String finalStatus = scalar("SELECT status FROM queue_item WHERE item_id = '" + itemId + "'");
+
+            if ("processing".equals(finalStatus)) {
+                assertFalse(claim.items().isEmpty());
+                assertEquals("conflict", adminResult);
+            } else {
+                assertEquals(terminalStatus, finalStatus);
+                assertEquals(terminalStatus, adminResult);
+                assertTrue(claim.items().isEmpty());
+            }
+        } finally {
+            executor.shutdownNow();
         }
     }
 
@@ -400,6 +467,11 @@ class PostgresQueueContractTest {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(sql);
         }
+    }
+
+    @FunctionalInterface
+    private interface AdminRepair {
+        ItemResponse apply(UUID itemId);
     }
 
     private record DriverManagerDataSource(String url, String username, String password) implements DataSource {

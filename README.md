@@ -12,8 +12,8 @@ Items for different `sourceId` values may be processed concurrently.
 
 ## Modules
 
-- `sequenced-queue-core`: shared queue implementation, plain JDBC PostgreSQL repository, transaction abstraction, leases, retries, dead-letter handling, and admin repair semantics.
-- `sequenced-queue-server`: Spring Boot HTTP adapter, Flyway schema, and OpenAPI surface over `sequenced-queue-core`.
+- `sequenced-queue-core`: shared queue implementation, Flyway schema migration, plain JDBC PostgreSQL repository, transaction abstraction, leases, retries, dead-letter handling, and admin repair semantics.
+- `sequenced-queue-server`: Spring Boot HTTP adapter and OpenAPI surface over `sequenced-queue-core`.
 - `sequenced-queue-java-client`: Java HTTP client and polling worker helper.
 - `clients/java-direct`: trusted/internal Java PostgreSQL adapter that uses the same `sequenced-queue-core` implementation through a caller-provided `DataSource`.
 - `sequenced-queue-python-client`: Python HTTP client and polling worker helper.
@@ -39,6 +39,12 @@ Run Java tests:
 mvn test
 ```
 
+Run the required PostgreSQL contract suite with Docker-backed Testcontainers:
+
+```sh
+mvn verify -Ppostgres-contract
+```
+
 Run Python client tests:
 
 ```sh
@@ -60,4 +66,6 @@ Consumers must use idempotent handlers because worker crashes can cause duplicat
 
 The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
 
-Current support: `enqueue(queueName, EnqueueRequest)`, idempotency handling, per-source sequence assignment, and schema version lookup. This client version supports schema migration `V1`.
+The database must already have the `sequenced-queue-core` Flyway migration applied. This client version supports schema migration `V1`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
+
+Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, idempotency handling, per-source sequence assignment, and schema version lookup.

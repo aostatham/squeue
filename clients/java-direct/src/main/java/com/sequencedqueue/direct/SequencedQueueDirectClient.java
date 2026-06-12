@@ -16,6 +16,7 @@ import com.sequencedqueue.core.QueueOperations;
 public class SequencedQueueDirectClient {
     private static final String DEFAULT_JSON = "{}";
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
+    private static final String SUPPORTED_SCHEMA_VERSION = "1";
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -28,6 +29,9 @@ public class SequencedQueueDirectClient {
         this.defaultQueueName = builder.defaultQueueName;
         this.objectMapper = builder.objectMapper == null ? new ObjectMapper() : builder.objectMapper;
         this.queueOperations = QueueCoreFactory.create(dataSource, this.objectMapper, 60, DEFAULT_MAX_ATTEMPTS);
+        if (builder.validateSchemaOnBuild) {
+            validateSchemaCompatibility();
+        }
     }
 
     public static Builder builder() {
@@ -56,6 +60,13 @@ public class SequencedQueueDirectClient {
             return new QueueSchemaInfo(schemaInfo.schemaVersion());
         } catch (com.sequencedqueue.core.QueueException e) {
             throw mapCoreException(e);
+        }
+    }
+
+    private void validateSchemaCompatibility() {
+        QueueSchemaInfo schemaInfo = getSchemaInfo();
+        if (!SUPPORTED_SCHEMA_VERSION.equals(schemaInfo.schemaVersion())) {
+            throw new QueueUnavailableException("unsupported queue schema version: " + schemaInfo.schemaVersion(), null);
         }
     }
 
@@ -201,6 +212,7 @@ public class SequencedQueueDirectClient {
         private DataSource dataSource;
         private String defaultQueueName;
         private ObjectMapper objectMapper;
+        private boolean validateSchemaOnBuild;
 
         public Builder dataSource(DataSource dataSource) {
             this.dataSource = dataSource;
@@ -214,6 +226,11 @@ public class SequencedQueueDirectClient {
 
         public Builder objectMapper(ObjectMapper objectMapper) {
             this.objectMapper = objectMapper;
+            return this;
+        }
+
+        public Builder validateSchemaOnBuild(boolean validateSchemaOnBuild) {
+            this.validateSchemaOnBuild = validateSchemaOnBuild;
             return this;
         }
 

@@ -110,15 +110,17 @@ class DefaultQueueServiceTest {
     void recoveryReleasesSourceOnlyWhenLeaseMatchesExpiredItem() {
         FakeRepository repository = new FakeRepository();
         UUID leaseId = UUID.randomUUID();
-        repository.expiredItems.add(new QueueItemRow(UUID.randomUUID(), "q", "s", 1, "type", "{}", "{}", ItemStatus.processing, now(), "worker-1", leaseId, now().minusSeconds(1), 1, 5, null, null, null, null, now(), now()));
+        QueueItemRow expired = new QueueItemRow(UUID.randomUUID(), "q", "s", 1, "type", "{}", "{}", ItemStatus.processing, now(), "worker-1", leaseId, now().minusSeconds(1), 1, 5, null, null, null, null, now(), now());
+        repository.lockedItem = expired;
+        repository.source = new SourceStateRow("q", "s", 1, SourceStatus.leased, "worker-1", leaseId, now().minusSeconds(1), now(), now());
+        repository.expiredItems.add(expired);
         DefaultQueueService service = service(repository);
 
         service.recoverExpiredLeases();
 
         assertEquals(1, repository.failCalls);
-        assertEquals(1, repository.releaseSourceIfLeaseMatchesCalls);
-        assertEquals(0, repository.releaseSourceCalls);
-        assertEquals(leaseId, repository.lastMatchedLeaseId);
+        assertEquals(0, repository.releaseSourceIfLeaseMatchesCalls);
+        assertEquals(1, repository.releaseSourceCalls);
     }
 
     private DefaultQueueService service(FakeRepository repository) {

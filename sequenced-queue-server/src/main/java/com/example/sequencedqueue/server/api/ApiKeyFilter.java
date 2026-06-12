@@ -19,6 +19,15 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         @Value("${sequenced-queue.api-key}") String apiKey,
         @Value("${sequenced-queue.admin-api-key}") String adminApiKey
     ) {
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalArgumentException("sequenced-queue.api-key must not be blank");
+        }
+        if (adminApiKey == null || adminApiKey.isBlank()) {
+            throw new IllegalArgumentException("sequenced-queue.admin-api-key must not be blank");
+        }
+        if (apiKey.equals(adminApiKey)) {
+            throw new IllegalArgumentException("sequenced-queue.api-key and sequenced-queue.admin-api-key must differ");
+        }
         this.apiKey = apiKey;
         this.adminApiKey = adminApiKey;
     }
