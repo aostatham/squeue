@@ -2,9 +2,11 @@ package com.example.sequencedqueue.client;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -17,6 +19,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 public class SequencedQueueClient {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
+    };
+    private static final TypeReference<List<Map<String, Object>>> LIST_OF_MAPS_TYPE = new TypeReference<>() {
     };
 
     private final URI baseUrl;
@@ -36,23 +40,27 @@ public class SequencedQueueClient {
     }
 
     public EnqueueResponse enqueue(String queueName, EnqueueRequest request) {
-        return post("/queues/" + queueName + "/items", request, EnqueueResponse.class);
+        return post("/queues/" + pathSegment(queueName) + "/items", request, EnqueueResponse.class);
     }
 
     public ClaimResponse claim(String queueName, ClaimRequest request) {
-        return post("/queues/" + queueName + "/claims", request, ClaimResponse.class);
+        return post("/queues/" + pathSegment(queueName) + "/claims", request, ClaimResponse.class);
     }
 
     public void complete(String queueName, UUID itemId, CompleteRequest request) {
-        post("/queues/" + queueName + "/items/" + itemId + "/complete", request, Map.class);
+        post("/queues/" + pathSegment(queueName) + "/items/" + pathSegment(itemId.toString()) + "/complete", request, Map.class);
     }
 
     public void fail(String queueName, UUID itemId, FailRequest request) {
-        post("/queues/" + queueName + "/items/" + itemId + "/fail", request, Map.class);
+        post("/queues/" + pathSegment(queueName) + "/items/" + pathSegment(itemId.toString()) + "/fail", request, Map.class);
     }
 
     public void heartbeat(String queueName, UUID leaseId, HeartbeatRequest request) {
-        postNoBody("/queues/" + queueName + "/leases/" + leaseId + "/heartbeat", request);
+        postNoBody("/queues/" + pathSegment(queueName) + "/leases/" + pathSegment(leaseId.toString()) + "/heartbeat", request);
+    }
+
+    public List<Map<String, Object>> sourceItems(String queueName, String sourceId) {
+        return get("/queues/" + pathSegment(queueName) + "/sources/" + pathSegment(sourceId) + "/items", LIST_OF_MAPS_TYPE);
     }
 
     public SequencedQueueWorker.Builder worker(String queueName) {
@@ -88,10 +96,34 @@ public class SequencedQueueClient {
         }
     }
 
+    private <T> T get(String path, TypeReference<T> responseType) {
+        try {
+            HttpResponse<String> response = httpClient.send(getRequest(path), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 400) {
+                throw new QueueClientException(response.statusCode(), response.body());
+            }
+            return objectMapper.readValue(response.body(), responseType);
+        } catch (IOException e) {
+            throw new QueueClientException(0, e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new QueueClientException(0, "interrupted");
+        }
+    }
+
     private HttpRequest request(String path, Object body) throws IOException {
         HttpRequest.Builder builder = HttpRequest.newBuilder(baseUrl.resolve(path))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.header("Authorization", "Bearer " + apiKey);
+        }
+        return builder.build();
+    }
+
+    private HttpRequest getRequest(String path) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(baseUrl.resolve(path))
+            .GET();
         if (apiKey != null && !apiKey.isBlank()) {
             builder.header("Authorization", "Bearer " + apiKey);
         }
@@ -107,6 +139,10 @@ public class SequencedQueueClient {
 
     Map<String, Object> readMap(Object value) {
         return objectMapper.convertValue(value, MAP_TYPE);
+    }
+
+    private static String pathSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     public static final class Builder {

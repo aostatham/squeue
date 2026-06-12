@@ -4,6 +4,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
+from urllib.parse import quote
 
 import requests
 
@@ -45,7 +46,7 @@ class SequencedQueueClient:
         max_attempts: int | None = None,
     ) -> dict[str, Any]:
         return self._post(
-            f"/queues/{queue_name}/items",
+            f"/queues/{_path_segment(queue_name)}/items",
             {
                 "sourceId": source_id,
                 "itemType": item_type,
@@ -59,7 +60,7 @@ class SequencedQueueClient:
 
     def claim(self, queue_name: str, worker_id: str, supported_item_types: list[str], lease_seconds: int = 60) -> dict[str, Any]:
         return self._post(
-            f"/queues/{queue_name}/claims",
+            f"/queues/{_path_segment(queue_name)}/claims",
             {
                 "workerId": worker_id,
                 "supportedItemTypes": supported_item_types,
@@ -70,7 +71,7 @@ class SequencedQueueClient:
 
     def complete(self, queue_name: str, item_id: str, worker_id: str, lease_id: str, result: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._post(
-            f"/queues/{queue_name}/items/{item_id}/complete",
+            f"/queues/{_path_segment(queue_name)}/items/{_path_segment(item_id)}/complete",
             {"workerId": worker_id, "leaseId": lease_id, "result": result or {}},
         )
 
@@ -86,7 +87,7 @@ class SequencedQueueClient:
         backoff_seconds: int | None = None,
     ) -> dict[str, Any]:
         return self._post(
-            f"/queues/{queue_name}/items/{item_id}/fail",
+            f"/queues/{_path_segment(queue_name)}/items/{_path_segment(item_id)}/fail",
             {
                 "workerId": worker_id,
                 "leaseId": lease_id,
@@ -99,13 +100,28 @@ class SequencedQueueClient:
 
     def heartbeat(self, queue_name: str, lease_id: str, worker_id: str, extend_by_seconds: int = 60) -> None:
         self._post(
-            f"/queues/{queue_name}/leases/{lease_id}/heartbeat",
+            f"/queues/{_path_segment(queue_name)}/leases/{_path_segment(lease_id)}/heartbeat",
             {"workerId": worker_id, "extendBySeconds": extend_by_seconds},
             expect_json=False,
         )
 
+    def source_items(self, queue_name: str, source_id: str) -> list[dict[str, Any]]:
+        return self._get(f"/queues/{_path_segment(queue_name)}/sources/{_path_segment(source_id)}/items")
+
     def worker(self, queue_name: str, worker_id: str, supported_item_types: list[str], lease_seconds: int = 60) -> "SequencedQueueWorker":
         return SequencedQueueWorker(self, queue_name, worker_id, supported_item_types, lease_seconds)
+
+    def _get(self, path: str) -> list[dict[str, Any]]:
+        response = requests.get(
+            self.base_url + path,
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
+        if response.status_code >= 400:
+            raise QueueClientError(response.status_code, response.text)
+        if not response.text:
+            return []
+        return response.json()
 
     def _post(self, path: str, body: dict[str, Any], expect_json: bool = True) -> dict[str, Any]:
         response = requests.post(
@@ -179,7 +195,8 @@ class SequencedQueueWorker:
             headers=raw_item.get("headers") or {},
         )
         stop_heartbeat = threading.Event()
-        heartbeat = threading.Thread(target=self._heartbeat_loop, args=(lease_id, stop_heartbeat), daemon=True)
+        lease_lost = threading.Event()
+        heartbeat = threading.Thread(target=self._heartbeat_loop, args=(lease_id, stop_heartbeat, lease_lost), daemon=True)
         heartbeat.start()
         try:
             handler = self.handlers.get(item.item_type)
@@ -187,16 +204,30 @@ class SequencedQueueWorker:
                 self.client.fail(self.queue_name, item.item_id, self.worker_id, lease_id, False, "NO_HANDLER", f"No handler for {item.item_type}")
                 return
             result = handler(item)
+            if lease_lost.is_set():
+                return
             self.client.complete(self.queue_name, item.item_id, self.worker_id, lease_id, result or {})
         except RetryableQueueError as exc:
+            if lease_lost.is_set():
+                return
             self.client.fail(self.queue_name, item.item_id, self.worker_id, lease_id, True, exc.__class__.__name__, str(exc))
         except Exception as exc:
+            if lease_lost.is_set():
+                return
             self.client.fail(self.queue_name, item.item_id, self.worker_id, lease_id, False, exc.__class__.__name__, str(exc))
         finally:
             stop_heartbeat.set()
             heartbeat.join(timeout=1)
 
-    def _heartbeat_loop(self, lease_id: str, stop: threading.Event) -> None:
+    def _heartbeat_loop(self, lease_id: str, stop: threading.Event, lease_lost: threading.Event) -> None:
         interval = max(1, self.lease_seconds // 2)
         while not stop.wait(interval):
-            self.client.heartbeat(self.queue_name, lease_id, self.worker_id, self.lease_seconds)
+            try:
+                self.client.heartbeat(self.queue_name, lease_id, self.worker_id, self.lease_seconds)
+            except Exception:
+                lease_lost.set()
+                stop.set()
+
+
+def _path_segment(value: str) -> str:
+    return quote(str(value), safe="")

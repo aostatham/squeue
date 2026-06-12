@@ -2,6 +2,8 @@ package com.sequencedqueue.direct;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.List;
+import java.util.UUID;
 
 import javax.sql.DataSource;
 
@@ -57,6 +59,86 @@ public class SequencedQueueDirectClient {
         }
     }
 
+    public ClaimResponse claim(String queueName, ClaimRequest request) {
+        try {
+            return toDirect(queueOperations.claim(queueName, new QueueDtos.ClaimRequest(request.workerId(), request.supportedItemTypes(), request.leaseSeconds(), request.maxItems())));
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public ItemResponse complete(String queueName, UUID itemId, CompleteRequest request) {
+        try {
+            return toDirect(queueOperations.complete(queueName, itemId, new QueueDtos.CompleteRequest(request.workerId(), request.leaseId(), request.result())));
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public ItemResponse fail(String queueName, UUID itemId, FailRequest request) {
+        try {
+            return toDirect(queueOperations.fail(queueName, itemId, new QueueDtos.FailRequest(request.workerId(), request.leaseId(), request.retryable(), request.errorType(), request.errorMessage(), request.backoffSeconds())));
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public void heartbeat(String queueName, UUID leaseId, HeartbeatRequest request) {
+        try {
+            queueOperations.heartbeat(queueName, leaseId, new QueueDtos.HeartbeatRequest(request.workerId(), request.extendBySeconds()));
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public ItemResponse retry(String queueName, UUID itemId) {
+        try {
+            return toDirect(queueOperations.retry(queueName, itemId));
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public ItemResponse skip(String queueName, UUID itemId) {
+        try {
+            return toDirect(queueOperations.skip(queueName, itemId));
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public ItemResponse cancel(String queueName, UUID itemId) {
+        try {
+            return toDirect(queueOperations.cancel(queueName, itemId));
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public List<SourceResponse> blockedSources(String queueName) {
+        try {
+            return queueOperations.blockedSources(queueName).stream().map(this::toDirect).toList();
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public SourceResponse unblockSource(String queueName, String sourceId) {
+        try {
+            return toDirect(queueOperations.unblockSource(queueName, sourceId));
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
+    public void recoverExpiredLeases() {
+        try {
+            queueOperations.recoverExpiredLeases();
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
     private QueueDtos.EnqueueRequest toCoreRequest(EnqueueRequest request) {
         validateRequest(request);
         return new QueueDtos.EnqueueRequest(
@@ -99,6 +181,20 @@ public class SequencedQueueDirectClient {
             return new ItemNotFoundException(e.getMessage());
         }
         return new QueueUnavailableException(e.getMessage(), e);
+    }
+
+    private ClaimResponse toDirect(QueueDtos.ClaimResponse response) {
+        return new ClaimResponse(response.leaseId(), response.queueName(), response.sourceId(), response.leaseUntil(), response.items().stream()
+            .map(item -> new ClaimItem(item.itemId(), item.sequenceNo(), item.itemType(), item.payload(), item.headers()))
+            .toList());
+    }
+
+    private ItemResponse toDirect(QueueDtos.ItemResponse item) {
+        return new ItemResponse(item.itemId(), item.queueName(), item.sourceId(), item.sequenceNo(), item.itemType(), item.payload(), item.headers(), item.status(), item.availableAt(), item.claimedBy(), item.leaseId(), item.leaseUntil(), item.attemptCount(), item.maxAttempts(), item.idempotencyKey(), item.lastErrorType(), item.lastErrorMessage(), item.result(), item.createdAt(), item.updatedAt());
+    }
+
+    private SourceResponse toDirect(QueueDtos.SourceResponse source) {
+        return new SourceResponse(source.queueName(), source.sourceId(), source.nextSequenceNo(), source.status(), source.leasedBy(), source.leaseId(), source.leaseUntil(), source.updatedAt());
     }
 
     public static final class Builder {

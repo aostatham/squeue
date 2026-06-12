@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -105,7 +106,10 @@ public class DefaultQueueService implements QueueOperations {
             if (source.status() != SourceStatus.blocked) {
                 throw new QueueException(QueueException.CONFLICT, "source is not blocked");
             }
-            repository.skipDeadLetteredHead(queueName, sourceId, now);
+            Optional<QueueItemRow> head = repository.findHeadBlockingItem(queueName, sourceId);
+            if (head.isPresent() && head.get().status() == ItemStatus.dead_lettered) {
+                throw new QueueException(QueueException.CONFLICT, "dead-lettered head remains; use retry, skip, or cancel on the item");
+            }
             repository.releaseSource(queueName, sourceId, now);
             return toSourceResponse(repository.findSource(queueName, sourceId));
         });

@@ -55,6 +55,46 @@ class DefaultQueueServiceTest {
     }
 
     @Test
+    void unblockSourceRejectsWhenDeadLetteredHeadRemains() {
+        FakeRepository repository = new FakeRepository();
+        repository.source = source(SourceStatus.blocked);
+        repository.lockedItem = item(UUID.randomUUID(), "q", "s", 1, ItemStatus.dead_lettered);
+        DefaultQueueService service = service(repository);
+
+        QueueException error = assertThrows(QueueException.class, () -> service.unblockSource("q", "s"));
+
+        assertEquals(QueueException.CONFLICT, error.statusCode());
+        assertEquals(0, repository.releaseSourceCalls);
+        assertEquals(0, repository.skipDeadLetteredHeadCalls);
+    }
+
+    @Test
+    void unblockSourceDoesNotChangeItemStatus() {
+        FakeRepository repository = new FakeRepository();
+        repository.source = source(SourceStatus.blocked);
+        repository.lockedItem = item(UUID.randomUUID(), "q", "s", 1, ItemStatus.failed);
+        DefaultQueueService service = service(repository);
+
+        service.unblockSource("q", "s");
+
+        assertEquals(1, repository.releaseSourceCalls);
+        assertEquals(0, repository.adminStatusCalls);
+        assertEquals(0, repository.skipDeadLetteredHeadCalls);
+    }
+
+    @Test
+    void unblockSourceSucceedsOnlyAfterDeadLetteredHeadWasRepaired() {
+        FakeRepository repository = new FakeRepository();
+        repository.source = source(SourceStatus.blocked);
+        repository.lockedItem = item(UUID.randomUUID(), "q", "s", 1, ItemStatus.skipped);
+        DefaultQueueService service = service(repository);
+
+        service.unblockSource("q", "s");
+
+        assertEquals(1, repository.releaseSourceCalls);
+    }
+
+    @Test
     void adminSkipRejectsProcessingItemAndDoesNotReleaseSource() {
         FakeRepository repository = new FakeRepository();
         repository.lockedItem = item(UUID.randomUUID(), "q", "s", 1, ItemStatus.processing);
@@ -114,6 +154,8 @@ class DefaultQueueServiceTest {
         int releaseSourceCalls;
         int releaseSourceIfLeaseMatchesCalls;
         int failCalls;
+        int adminStatusCalls;
+        int skipDeadLetteredHeadCalls;
         UUID lastMatchedLeaseId;
         final List<QueueItemRow> expiredItems = new ArrayList<>();
 
@@ -214,11 +256,13 @@ class DefaultQueueServiceTest {
 
         @Override
         public QueueItemRow adminStatus(UUID itemId, ItemStatus status, OffsetDateTime availableAt, OffsetDateTime now) {
+            adminStatusCalls++;
             return lockedItem;
         }
 
         @Override
         public Optional<QueueItemRow> skipDeadLetteredHead(String queueName, String sourceId, OffsetDateTime now) {
+            skipDeadLetteredHeadCalls++;
             return Optional.empty();
         }
 

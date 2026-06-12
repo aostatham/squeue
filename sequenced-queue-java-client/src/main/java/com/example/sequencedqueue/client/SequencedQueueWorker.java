@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 public class SequencedQueueWorker implements AutoCloseable {
@@ -59,8 +60,16 @@ public class SequencedQueueWorker implements AutoCloseable {
 
     private void handleClaim(ClaimResponse claim) {
         ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor();
+        AtomicBoolean leaseLost = new AtomicBoolean(false);
         heartbeats.scheduleAtFixedRate(
-            () -> client.heartbeat(queueName, claim.leaseId(), new HeartbeatRequest(workerId, leaseSeconds)),
+            () -> {
+                try {
+                    client.heartbeat(queueName, claim.leaseId(), new HeartbeatRequest(workerId, leaseSeconds));
+                } catch (RuntimeException e) {
+                    leaseLost.set(true);
+                    heartbeats.shutdown();
+                }
+            },
             Math.max(1, leaseSeconds / 2),
             Math.max(1, leaseSeconds / 2),
             TimeUnit.SECONDS
@@ -73,12 +82,18 @@ public class SequencedQueueWorker implements AutoCloseable {
                 return;
             }
             QueueResult result = handler.apply(item);
+            if (leaseLost.get()) {
+                return;
+            }
             if (result.succeeded()) {
                 client.complete(queueName, item.itemId(), new CompleteRequest(workerId, claim.leaseId(), result.result()));
             } else {
                 client.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), result.retryable(), result.errorType(), result.errorMessage(), null));
             }
         } catch (Exception e) {
+            if (leaseLost.get()) {
+                return;
+            }
             ClaimItem item = claim.items().getFirst();
             client.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), true, e.getClass().getSimpleName(), e.getMessage(), null));
         } finally {

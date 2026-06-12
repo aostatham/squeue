@@ -1,0 +1,449 @@
+package com.sequencedqueue.core;
+
+import static com.sequencedqueue.core.QueueDtos.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.sql.Statement;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.logging.Logger;
+
+import javax.sql.DataSource;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+@Testcontainers(disabledWithoutDocker = true)
+class PostgresQueueContractTest {
+    private static final String QUEUE = "wf.commands";
+
+    @Container
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+
+    static DataSource dataSource;
+    static QueueOperations queue;
+
+    @BeforeAll
+    static void setUpSchema() throws Exception {
+        dataSource = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        applySchema(dataSource);
+        queue = QueueCoreFactory.create(dataSource, new ObjectMapper(), 60, 5);
+    }
+
+    @BeforeEach
+    void clearTables() throws Exception {
+        execute("TRUNCATE queue_item, queue_source_state");
+    }
+
+    @Test
+    void concurrentEnqueuesSameSourceProduceSequenceOneToOneHundred() throws Exception {
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(16);
+        try {
+            List<Callable<Long>> tasks = new ArrayList<>();
+            for (int i = 0; i < 100; i++) {
+                tasks.add(() -> {
+                    start.await();
+                    return enqueue("source-1").sequenceNo();
+                });
+            }
+            var futures = tasks.stream().map(executor::submit).toList();
+            start.countDown();
+
+            List<Long> sequences = new ArrayList<>();
+            for (var future : futures) {
+                sequences.add(future.get());
+            }
+            Collections.sort(sequences);
+
+            assertEquals(100, count("queue_item"));
+            assertEquals(100, new HashSet<>(sequences).size());
+            for (int i = 1; i <= 100; i++) {
+                assertEquals(i, sequences.get(i - 1));
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentDuplicateIdempotencyCreatesOneItemAndDoesNotAdvanceSequence() throws Exception {
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(16);
+        try {
+            List<Callable<UUID>> tasks = new ArrayList<>();
+            for (int i = 0; i < 50; i++) {
+                tasks.add(() -> {
+                    start.await();
+                    return queue.enqueue(QUEUE, new EnqueueRequest("source-1", "type", "idem-1", Map.of("item", "x"), Map.of(), null, 5)).itemId();
+                });
+            }
+            var futures = tasks.stream().map(executor::submit).toList();
+            start.countDown();
+
+            List<UUID> itemIds = new ArrayList<>();
+            for (var future : futures) {
+                itemIds.add(future.get());
+            }
+
+            assertEquals(1, new HashSet<>(itemIds).size());
+            assertEquals(1, count("queue_item"));
+            assertEquals(2, enqueue("source-1").sequenceNo());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void sameSourceCannotBeClaimedConcurrently() throws Exception {
+        for (int i = 0; i < 10; i++) {
+            enqueue("source-1");
+        }
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(20);
+        try {
+            List<Callable<ClaimResponse>> tasks = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                int worker = i;
+                tasks.add(() -> {
+                    start.await();
+                    return claim("worker-" + worker);
+                });
+            }
+            var futures = tasks.stream().map(executor::submit).toList();
+            start.countDown();
+
+            List<ClaimResponse> claims = new ArrayList<>();
+            for (var future : futures) {
+                claims.add(future.get());
+            }
+
+            assertEquals(1, claims.stream().filter(c -> !c.items().isEmpty()).count());
+            assertEquals(1, countWhere("queue_item", "status = 'processing'"));
+            assertEquals("leased", scalar("SELECT status FROM queue_source_state WHERE queue_name = 'wf.commands' AND source_id = 'source-1'"));
+            assertTrue(claim("late-worker").items().isEmpty());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void differentSourcesCanBeClaimedConcurrently() throws Exception {
+        for (int i = 0; i < 20; i++) {
+            enqueue("source-" + i);
+        }
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(20);
+        try {
+            List<Callable<ClaimResponse>> tasks = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                int worker = i;
+                tasks.add(() -> {
+                    start.await();
+                    return claim("worker-" + worker);
+                });
+            }
+            var futures = tasks.stream().map(executor::submit).toList();
+            start.countDown();
+
+            List<String> sourceIds = new ArrayList<>();
+            for (var future : futures) {
+                ClaimResponse claim = future.get();
+                if (!claim.items().isEmpty()) {
+                    sourceIds.add(claim.sourceId());
+                }
+            }
+
+            assertTrue(sourceIds.size() > 1);
+            assertEquals(sourceIds.size(), new HashSet<>(sourceIds).size());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void claimOnlyReturnsHeadItem() throws Exception {
+        enqueue("source-1");
+        enqueue("source-1");
+        enqueue("source-1");
+
+        ClaimResponse claim = claim("worker-1");
+
+        assertEquals(1, claim.items().size());
+        assertEquals(1, claim.items().getFirst().sequenceNo());
+        assertEquals("pending", scalar("SELECT status FROM queue_item WHERE sequence_no = 2"));
+        assertEquals("pending", scalar("SELECT status FROM queue_item WHERE sequence_no = 3"));
+    }
+
+    @Test
+    void retryWaitHeadBlocksLaterPendingItemUntilAvailableAt() throws Exception {
+        enqueue("source-1");
+        enqueue("source-1");
+        ClaimResponse first = claim("worker-1");
+        fail(first, true, 3600);
+
+        assertTrue(claim("worker-2").items().isEmpty());
+
+        execute("UPDATE queue_item SET available_at = now() - interval '1 second' WHERE sequence_no = 1");
+        ClaimResponse retry = claim("worker-3");
+
+        assertEquals(1, retry.items().getFirst().sequenceNo());
+    }
+
+    @Test
+    void deadLetteredHeadBlocksSource() throws Exception {
+        enqueue("source-1", 1);
+        enqueue("source-1");
+        ClaimResponse first = claim("worker-1");
+
+        fail(first, true, null);
+
+        assertEquals("dead_lettered", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+        assertEquals("blocked", scalar("SELECT status FROM queue_source_state WHERE source_id = 'source-1'"));
+        assertTrue(claim("worker-2").items().isEmpty());
+    }
+
+    @Test
+    void failedHeadIsPassableAndDoesNotStallSource() throws Exception {
+        enqueue("source-1");
+        enqueue("source-1");
+        ClaimResponse first = claim("worker-1");
+
+        queue.fail(QUEUE, first.items().getFirst().itemId(), new FailRequest("worker-1", first.leaseId(), false, "ERR", "no retry", null));
+
+        assertEquals("failed", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+        assertEquals("idle", scalar("SELECT status FROM queue_source_state WHERE source_id = 'source-1'"));
+        ClaimResponse second = claim("worker-2");
+        assertEquals(2, second.items().getFirst().sequenceNo());
+    }
+
+    @Test
+    void wrongWorkerCannotComplete() throws Exception {
+        enqueue("source-1");
+        ClaimResponse claim = claim("worker-1");
+
+        QueueException error = assertThrows(QueueException.class, () -> queue.complete(QUEUE, claim.items().getFirst().itemId(), new CompleteRequest("worker-2", claim.leaseId(), Map.of())));
+
+        assertEquals(QueueException.CONFLICT, error.statusCode());
+        assertEquals("processing", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+    }
+
+    @Test
+    void wrongLeaseCannotComplete() throws Exception {
+        enqueue("source-1");
+        ClaimResponse claim = claim("worker-1");
+
+        QueueException error = assertThrows(QueueException.class, () -> queue.complete(QUEUE, claim.items().getFirst().itemId(), new CompleteRequest("worker-1", UUID.randomUUID(), Map.of())));
+
+        assertEquals(QueueException.CONFLICT, error.statusCode());
+        assertEquals("processing", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+    }
+
+    @Test
+    void expiredLeaseCannotComplete() throws Exception {
+        enqueue("source-1");
+        ClaimResponse claim = claim("worker-1");
+        expireLeases();
+
+        QueueException error = assertThrows(QueueException.class, () -> queue.complete(QUEUE, claim.items().getFirst().itemId(), new CompleteRequest("worker-1", claim.leaseId(), Map.of())));
+
+        assertEquals(QueueException.CONFLICT, error.statusCode());
+    }
+
+    @Test
+    void heartbeatAfterLeaseExpiryFails() throws Exception {
+        enqueue("source-1");
+        ClaimResponse claim = claim("worker-1");
+        expireLeases();
+        OffsetDateTime before = leaseUntil();
+
+        QueueException error = assertThrows(QueueException.class, () -> queue.heartbeat(QUEUE, claim.leaseId(), new HeartbeatRequest("worker-1", 60)));
+
+        assertEquals(QueueException.CONFLICT, error.statusCode());
+        assertEquals(before, leaseUntil());
+    }
+
+    @Test
+    void recoverExpiredLeaseMovesItemToRetryWaitAndReleasesMatchingSourceLease() throws Exception {
+        enqueue("source-1");
+        claim("worker-1");
+        expireLeases();
+
+        queue.recoverExpiredLeases();
+
+        assertEquals("retry_wait", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+        assertEquals(0, countWhere("queue_item", "lease_id IS NOT NULL OR claimed_by IS NOT NULL OR lease_until IS NOT NULL"));
+        assertEquals("idle", scalar("SELECT status FROM queue_source_state WHERE source_id = 'source-1'"));
+    }
+
+    @Test
+    void recoverExpiredLeaseWithAttemptsExhaustedDeadLettersAndBlocksSource() throws Exception {
+        enqueue("source-1", 1);
+        claim("worker-1");
+        expireLeases();
+
+        queue.recoverExpiredLeases();
+
+        assertEquals("dead_lettered", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+        assertEquals("blocked", scalar("SELECT status FROM queue_source_state WHERE source_id = 'source-1'"));
+    }
+
+    @Test
+    void adminSkipDeadLetteredHeadUnblocksSource() throws Exception {
+        enqueue("source-1", 1);
+        enqueue("source-1");
+        ClaimResponse first = claim("worker-1");
+        fail(first, true, null);
+
+        queue.skip(QUEUE, first.items().getFirst().itemId());
+
+        assertEquals("skipped", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+        assertEquals("idle", scalar("SELECT status FROM queue_source_state WHERE source_id = 'source-1'"));
+        assertEquals(2, claim("worker-2").items().getFirst().sequenceNo());
+    }
+
+    @Test
+    void adminSkipProcessingItemIsRejected() throws Exception {
+        enqueue("source-1");
+        ClaimResponse claim = claim("worker-1");
+
+        QueueException error = assertThrows(QueueException.class, () -> queue.skip(QUEUE, claim.items().getFirst().itemId()));
+
+        assertEquals(QueueException.CONFLICT, error.statusCode());
+        assertEquals("leased", scalar("SELECT status FROM queue_source_state WHERE source_id = 'source-1'"));
+        assertEquals("processing", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+    }
+
+    private EnqueueResponse enqueue(String sourceId) {
+        return enqueue(sourceId, 5);
+    }
+
+    private EnqueueResponse enqueue(String sourceId, int maxAttempts) {
+        return queue.enqueue(QUEUE, new EnqueueRequest(sourceId, "type", null, Map.of("source", sourceId), Map.of(), null, maxAttempts));
+    }
+
+    private ClaimResponse claim(String workerId) {
+        return queue.claim(QUEUE, new ClaimRequest(workerId, List.of("type"), 60, 1));
+    }
+
+    private void fail(ClaimResponse claim, boolean retryable, Integer backoffSeconds) {
+        queue.fail(QUEUE, claim.items().getFirst().itemId(), new FailRequest("worker-1", claim.leaseId(), retryable, "ERR", "failed", backoffSeconds));
+    }
+
+    private static void applySchema(DataSource dataSource) throws Exception {
+        Path migrationPath = Path.of("sequenced-queue-core/src/main/resources/db/migration/V1__initial_queue_schema.sql");
+        if (!Files.exists(migrationPath)) {
+            migrationPath = Path.of("../sequenced-queue-core/src/main/resources/db/migration/V1__initial_queue_schema.sql");
+        }
+        String migration = Files.readString(migrationPath);
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute(migration);
+        }
+    }
+
+    private void expireLeases() throws Exception {
+        execute("UPDATE queue_item SET lease_until = now() - interval '1 second'");
+        execute("UPDATE queue_source_state SET lease_until = now() - interval '1 second'");
+    }
+
+    private OffsetDateTime leaseUntil() throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("SELECT lease_until FROM queue_item WHERE sequence_no = 1")) {
+            rs.next();
+            return rs.getObject(1, OffsetDateTime.class);
+        }
+    }
+
+    private static int count(String table) throws Exception {
+        return countWhere(table, "true");
+    }
+
+    private static int countWhere(String table, String where) throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("SELECT count(*) FROM " + table + " WHERE " + where)) {
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    private static String scalar(String sql) throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery(sql)) {
+            assertTrue(rs.next());
+            return rs.getString(1);
+        }
+    }
+
+    private static void execute(String sql) throws Exception {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        }
+    }
+
+    private record DriverManagerDataSource(String url, String username, String password) implements DataSource {
+        @Override
+        public Connection getConnection() throws SQLException {
+            return DriverManager.getConnection(url, username, password);
+        }
+
+        @Override
+        public Connection getConnection(String username, String password) throws SQLException {
+            return DriverManager.getConnection(url, username, password);
+        }
+
+        @Override
+        public PrintWriter getLogWriter() {
+            return null;
+        }
+
+        @Override
+        public void setLogWriter(PrintWriter out) {
+        }
+
+        @Override
+        public void setLoginTimeout(int seconds) {
+        }
+
+        @Override
+        public int getLoginTimeout() {
+            return 0;
+        }
+
+        @Override
+        public Logger getParentLogger() throws SQLFeatureNotSupportedException {
+            throw new SQLFeatureNotSupportedException();
+        }
+
+        @Override
+        public <T> T unwrap(Class<T> iface) throws SQLException {
+            throw new SQLException("unwrap is not supported");
+        }
+
+        @Override
+        public boolean isWrapperFor(Class<?> iface) {
+            return false;
+        }
+    }
+}

@@ -1,6 +1,7 @@
 package com.sequencedqueue.direct;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.PrintWriter;
 import java.nio.file.Files;
@@ -13,6 +14,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -22,6 +24,7 @@ import java.util.logging.Logger;
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -32,16 +35,22 @@ class SequencedQueueDirectClientTest {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
+    static DataSource dataSource;
     static SequencedQueueDirectClient client;
 
     @BeforeAll
     static void setUp() throws Exception {
-        DataSource dataSource = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        dataSource = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         applySchema(dataSource);
         client = SequencedQueueDirectClient.builder()
             .dataSource(dataSource)
             .defaultQueueName("wf.commands")
             .build();
+    }
+
+    @BeforeEach
+    void clearTables() throws Exception {
+        execute("TRUNCATE queue_item, queue_source_state");
     }
 
     @Test
@@ -105,15 +114,94 @@ class SequencedQueueDirectClientTest {
         assertEquals(2, next.sequenceNo());
     }
 
+    @Test
+    void directClaimCompleteUsesSharedCore() {
+        EnqueueResponse enqueued = client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-complete")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+
+        ClaimResponse claim = client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 60, 1));
+        ItemResponse completed = client.complete("wf.commands", enqueued.itemId(), new CompleteRequest("worker-1", claim.leaseId(), Map.of("ok", true)));
+
+        assertEquals("succeeded", completed.status());
+    }
+
+    @Test
+    void directWrongLeaseCannotComplete() {
+        client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-wrong-lease")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        ClaimResponse claim = client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 60, 1));
+
+        QueueConflictException error = assertThrows(QueueConflictException.class, () ->
+            client.complete("wf.commands", claim.items().getFirst().itemId(), new CompleteRequest("worker-1", java.util.UUID.randomUUID(), Map.of())));
+
+        assertEquals(QueueConflictException.class, error.getClass());
+    }
+
+    @Test
+    void directHeartbeatAfterExpiryFails() throws Exception {
+        client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-heartbeat")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        ClaimResponse claim = client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 60, 1));
+        execute("UPDATE queue_item SET lease_until = now() - interval '1 second'");
+        execute("UPDATE queue_source_state SET lease_until = now() - interval '1 second'");
+
+        assertThrows(QueueConflictException.class, () ->
+            client.heartbeat("wf.commands", claim.leaseId(), new HeartbeatRequest("worker-1", 60)));
+    }
+
+    @Test
+    void directAdminSkipDeadLetteredHeadUnblocksSource() throws Exception {
+        EnqueueResponse first = client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-skip")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .maxAttempts(1)
+            .build());
+        client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-skip")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        ClaimResponse claim = client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 60, 1));
+        client.fail("wf.commands", first.itemId(), new FailRequest("worker-1", claim.leaseId(), true, "ERR", "failed", null));
+
+        ItemResponse skipped = client.skip("wf.commands", first.itemId());
+        ClaimResponse next = client.claim("wf.commands", new ClaimRequest("worker-2", List.of("wf.command"), 60, 1));
+
+        assertEquals("skipped", skipped.status());
+        assertEquals(2, next.items().getFirst().sequenceNo());
+    }
+
     private static void applySchema(DataSource dataSource) throws Exception {
-        Path migrationPath = Path.of("sequenced-queue-server/src/main/resources/db/migration/V1__initial_queue_schema.sql");
+        Path migrationPath = Path.of("sequenced-queue-core/src/main/resources/db/migration/V1__initial_queue_schema.sql");
         if (!Files.exists(migrationPath)) {
-            migrationPath = Path.of("../../sequenced-queue-server/src/main/resources/db/migration/V1__initial_queue_schema.sql");
+            migrationPath = Path.of("../../sequenced-queue-core/src/main/resources/db/migration/V1__initial_queue_schema.sql");
         }
         String migration = Files.readString(migrationPath);
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute(migration);
+        }
+    }
+
+    private static void execute(String sql) throws Exception {
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute(sql);
         }
     }
 
