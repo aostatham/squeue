@@ -80,6 +80,11 @@ public class AdminController {
         return service.unblockSource(queueName, sourceId, actorId(request), reason(body));
     }
 
+    @PostMapping("/retention/purge")
+    public RetentionPurgeResponse purgeRetention(@PathVariable("queueName") String queueName, @RequestBody RetentionPurgeRequest body, HttpServletRequest request) {
+        return service.purgeRetention(queueName, body, actorId(request));
+    }
+
     private static String actorId(HttpServletRequest request) {
         Object value = request.getAttribute(ApiKeyFilter.ACTOR_ID_ATTRIBUTE);
         return value == null ? null : value.toString();

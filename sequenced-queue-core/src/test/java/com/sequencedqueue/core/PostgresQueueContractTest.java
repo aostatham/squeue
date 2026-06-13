@@ -380,6 +380,70 @@ class PostgresQueueContractTest {
     }
 
     @Test
+    void lifecycleOperationsDoNotWriteAdminAudit() throws Exception {
+        enqueue("complete-source");
+        ClaimResponse completeClaim = claim("worker-1");
+        queue.heartbeat(QUEUE, completeClaim.leaseId(), new HeartbeatRequest("worker-1", 60));
+        queue.complete(QUEUE, completeClaim.items().getFirst().itemId(), new CompleteRequest("worker-1", completeClaim.leaseId(), Map.of()));
+
+        enqueue("fail-source");
+        ClaimResponse failClaim = claim("worker-2");
+        queue.fail(QUEUE, failClaim.items().getFirst().itemId(), new FailRequest("worker-2", failClaim.leaseId(), false, "ERR", "failed", null));
+
+        assertEquals(0, count("queue_admin_audit"));
+    }
+
+    @Test
+    void retentionDryRunCountsWithoutDeletingOrAuditing() throws Exception {
+        enqueue("old-succeeded");
+        execute("UPDATE queue_item SET status = 'succeeded', updated_at = now() - interval '10 days' WHERE source_id = 'old-succeeded'");
+
+        RetentionPurgeResponse response = queue.purgeRetention(QUEUE,
+            new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("succeeded"), true, "dry run"),
+            "admin-api-key");
+
+        assertEquals(1, response.matched());
+        assertEquals(0, response.deleted());
+        assertEquals(1, count("queue_item"));
+        assertEquals(0, count("queue_admin_audit"));
+    }
+
+    @Test
+    void retentionPurgeDeletesOnlyEligibleTerminalRowsAndWritesAudit() throws Exception {
+        oldItem("old-succeeded", "succeeded");
+        oldItem("old-cancelled", "cancelled");
+        oldItem("old-skipped", "skipped");
+        oldItem("old-failed", "failed");
+        oldItem("old-pending", "pending");
+        oldItem("old-processing", "processing");
+        oldItem("old-retry-wait", "retry_wait");
+        oldItem("old-dead-lettered", "dead_lettered");
+
+        RetentionPurgeResponse response = queue.purgeRetention(QUEUE,
+            new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("succeeded", "cancelled", "skipped", "failed"), false, "delete terminal"),
+            "admin-api-key");
+
+        assertEquals(4, response.matched());
+        assertEquals(4, response.deleted());
+        assertEquals(4, count("queue_item"));
+        assertEquals(1, countWhere("queue_item", "status = 'pending'"));
+        assertEquals(1, countWhere("queue_item", "status = 'processing'"));
+        assertEquals(1, countWhere("queue_item", "status = 'retry_wait'"));
+        assertEquals(1, countWhere("queue_item", "status = 'dead_lettered'"));
+        assertEquals(1, countWhere("queue_admin_audit", "operation = 'retention_purge' AND actor_id = 'admin-api-key' AND reason = 'delete terminal'"));
+    }
+
+    @Test
+    void retentionPurgeRejectsBlockingStatuses() throws Exception {
+        QueueException error = assertThrows(QueueException.class, () -> queue.purgeRetention(QUEUE,
+            new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("dead_lettered"), false, "bad"),
+            "admin-api-key"));
+
+        assertEquals(QueueException.BAD_REQUEST, error.statusCode());
+        assertEquals(0, count("queue_admin_audit"));
+    }
+
+    @Test
     void failedAdminOperationDoesNotWriteSuccessAudit() throws Exception {
         enqueue("source-1");
         ClaimResponse claim = claim("worker-1");
@@ -430,7 +494,7 @@ class PostgresQueueContractTest {
 
     @Test
     void schemaInfoReportsFlywayVersion() {
-        assertEquals("2", queue.getSchemaInfo().schemaVersion());
+        assertEquals("3", queue.getSchemaInfo().schemaVersion());
     }
 
     private EnqueueResponse enqueue(String sourceId) {
@@ -447,6 +511,11 @@ class PostgresQueueContractTest {
 
     private void fail(ClaimResponse claim, boolean retryable, Integer backoffSeconds) {
         queue.fail(QUEUE, claim.items().getFirst().itemId(), new FailRequest("worker-1", claim.leaseId(), retryable, "ERR", "failed", backoffSeconds));
+    }
+
+    private void oldItem(String sourceId, String status) throws Exception {
+        enqueue(sourceId);
+        execute("UPDATE queue_item SET status = '" + status + "', updated_at = now() - interval '10 days' WHERE source_id = '" + sourceId + "'");
     }
 
     private static void applySchema(DataSource dataSource) throws Exception {

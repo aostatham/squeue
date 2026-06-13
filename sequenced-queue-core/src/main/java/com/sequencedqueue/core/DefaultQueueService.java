@@ -5,6 +5,7 @@ import static com.sequencedqueue.core.QueueDtos.*;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -16,6 +17,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class DefaultQueueService implements QueueOperations {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
+    private static final EnumSet<ItemStatus> RETENTION_PURGE_STATUSES = EnumSet.of(
+        ItemStatus.succeeded,
+        ItemStatus.cancelled,
+        ItemStatus.skipped,
+        ItemStatus.failed
+    );
 
     private final QueueRepository repository;
     private final TransactionRunner transactions;
@@ -168,6 +175,36 @@ public class DefaultQueueService implements QueueOperations {
     @Override
     public ItemResponse cancel(String queueName, UUID itemId, String actorId, String reason) {
         return transactions.inTransaction(() -> adminRepair(queueName, itemId, ItemStatus.cancelled, List.of(ItemStatus.pending, ItemStatus.retry_wait, ItemStatus.dead_lettered), "cancel", actorId, reason));
+    }
+
+    @Override
+    public RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request) {
+        return purgeRetention(queueName, request, null);
+    }
+
+    @Override
+    public RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request, String actorId) {
+        requireRequest(request);
+        requireText(queueName, "queueName");
+        if (request.olderThan() == null) {
+            throw new QueueException(QueueException.BAD_REQUEST, "olderThan is required").withQueueName(queueName);
+        }
+        List<ItemStatus> statuses = retentionStatuses(request.statuses(), queueName);
+        boolean dryRun = Boolean.TRUE.equals(request.dryRun());
+        return transactions.inTransaction(() -> {
+            long matched = repository.countRetentionEligible(queueName, request.olderThan(), statuses);
+            if (dryRun) {
+                return new RetentionPurgeResponse(queueName, true, matched, 0);
+            }
+            long deleted = repository.deleteRetentionEligible(queueName, request.olderThan(), statuses);
+            insertAudit(actorId, "retention_purge", queueName, null, null, null, null, request.reason(), Map.of(
+                "olderThan", request.olderThan().toString(),
+                "statuses", statuses.stream().map(Enum::name).toList(),
+                "matched", matched,
+                "deleted", deleted
+            ));
+            return new RetentionPurgeResponse(queueName, false, matched, deleted);
+        });
     }
 
     @Override
@@ -426,6 +463,32 @@ public class DefaultQueueService implements QueueOperations {
         if (request == null) {
             throw new QueueException(QueueException.BAD_REQUEST, "request body is required");
         }
+    }
+
+    private List<ItemStatus> retentionStatuses(List<String> requestedStatuses, String queueName) {
+        if (requestedStatuses == null || requestedStatuses.isEmpty()) {
+            throw new QueueException(QueueException.BAD_REQUEST, "statuses is required").withQueueName(queueName);
+        }
+        return requestedStatuses.stream()
+            .map(status -> retentionStatus(status, queueName))
+            .distinct()
+            .toList();
+    }
+
+    private ItemStatus retentionStatus(String status, String queueName) {
+        if (status == null || status.isBlank()) {
+            throw new QueueException(QueueException.BAD_REQUEST, "status is required").withQueueName(queueName);
+        }
+        ItemStatus itemStatus;
+        try {
+            itemStatus = ItemStatus.valueOf(status);
+        } catch (IllegalArgumentException e) {
+            throw new QueueException(QueueException.BAD_REQUEST, "unknown retention status " + status).withQueueName(queueName);
+        }
+        if (!RETENTION_PURGE_STATUSES.contains(itemStatus)) {
+            throw new QueueException(QueueException.BAD_REQUEST, "retention purge is not allowed for status " + status).withQueueName(queueName);
+        }
+        return itemStatus;
     }
 
     private String writeJson(Map<String, Object> value) {

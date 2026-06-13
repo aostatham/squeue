@@ -664,6 +664,56 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /admin/queues/{queueName}/retention/purge:
+    post:
+      summary: Manually purge old passable terminal items
+      description: >
+        Deletes only old items in passable terminal statuses: succeeded,
+        cancelled, skipped, and failed. Blocking statuses pending,
+        processing, retry_wait, and dead_lettered are never eligible.
+      security:
+        - AdminApiKey: []
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetentionPurgeRequest"
+            examples:
+              dryRun:
+                value:
+                  olderThan: "2026-01-01T00:00:00Z"
+                  statuses: ["succeeded", "cancelled", "skipped", "failed"]
+                  dryRun: true
+                  reason: "monthly cleanup preview"
+              actual:
+                value:
+                  olderThan: "2026-01-01T00:00:00Z"
+                  statuses: ["succeeded", "cancelled", "skipped", "failed"]
+                  dryRun: false
+                  reason: "monthly cleanup"
+      responses:
+        "200":
+          description: Purge result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionPurgeResponse"
+              examples:
+                purged:
+                  value:
+                    queueName: "wf.commands"
+                    dryRun: false
+                    matched: 42
+                    deleted: 42
+        default:
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 components:
   securitySchemes:
     WorkerApiKey:
@@ -693,7 +743,7 @@ components:
                 itemId: "00000000-0000-0000-0000-000000000001"
                 details: {}
     Unauthorized:
-      description: Missing bearer token
+      description: Missing or invalid bearer token
       content:
         application/json:
           schema:
@@ -704,18 +754,18 @@ components:
                 errorCode: "UNAUTHORIZED"
                 message: "missing bearer token"
                 details: {}
+            invalidApiKey:
+              value:
+                errorCode: "UNAUTHORIZED"
+                message: "invalid api key"
+                details: {}
     Forbidden:
-      description: Invalid or insufficient API key
+      description: Authenticated key does not have the required role
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
           examples:
-            invalidApiKey:
-              value:
-                errorCode: "FORBIDDEN"
-                message: "invalid api key"
-                details: {}
             adminApiKeyRequired:
               value:
                 errorCode: "FORBIDDEN"
@@ -941,6 +991,33 @@ components:
       type: object
       properties:
         reason: { type: string, nullable: true }
+    RetentionPurgeRequest:
+      type: object
+      required: [olderThan, statuses]
+      properties:
+        olderThan:
+          type: string
+          format: date-time
+          description: Delete matching terminal items whose updatedAt is older than this timestamp.
+        statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/ItemStatus"
+          description: Only succeeded, cancelled, skipped, and failed are accepted.
+        dryRun:
+          type: boolean
+          default: true
+        reason:
+          type: string
+          nullable: true
+    RetentionPurgeResponse:
+      type: object
+      required: [queueName, dryRun, matched, deleted]
+      properties:
+        queueName: { type: string }
+        dryRun: { type: boolean }
+        matched: { type: integer, format: int64 }
+        deleted: { type: integer, format: int64 }
     ErrorResponse:
       type: object
       required: [errorCode, message, details]

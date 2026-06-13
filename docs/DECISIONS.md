@@ -132,7 +132,7 @@ Database transactions are used for enqueue, claim, complete, fail, heartbeat, re
 
 Status: Accepted.
 
-Direct Java schema compatibility is implemented using Flyway schema version lookup through `sequenced-queue-core`. The direct Java client currently requires schema version `2`.
+Direct Java schema compatibility is implemented using Flyway schema version lookup through `sequenced-queue-core`. The direct Java client currently requires schema version `3`.
 
 Trusted direct Java deployments may call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` to fail fast when the schema is missing or incompatible.
 
@@ -179,6 +179,24 @@ Source ordering, leases, the head-item rule, dead-letter blocking, shared core, 
 
 CLI, UI, batching, `LISTEN/NOTIFY`, broker bridges, benchmark harness, queue-level database configuration, full API-key lifecycle, OAuth/OIDC, and archive tables are deferred.
 
+## SQ-026 - Keep Retention Manual and Passable-Terminal Only
+
+Status: Accepted.
+
+Retention is a manual admin operation, not a scheduler. It deletes only old passable terminal items: `succeeded`, `cancelled`, `skipped`, and `failed`.
+
+Retention never purges `pending`, `processing`, `retry_wait`, or `dead_lettered` rows because those statuses can affect source progression or operational repair.
+
+Actual retention purge writes admin audit. Dry-run purge counts rows without deleting and does not write audit.
+
+## SQ-027 - Keep API Keys Config-Only
+
+Status: Accepted.
+
+API keys are configured through application configuration only. There is a WORKER role for `/queues/**` and an ADMIN role for `/admin/**`; ADMIN can also call worker endpoints.
+
+The queue database does not store API keys. Full key lifecycle management, hashed key storage, OAuth/OIDC, and identity-provider integration are deferred until there is a concrete deployment requirement.
+
 ## Resolved Former Undecided Items
 
 The following earlier undecided items are resolved:
@@ -187,6 +205,8 @@ The following earlier undecided items are resolved:
 - Terminal status passability: resolved by SQ-024.
 - Admin audit: transactional admin audit is implemented.
 - Queue-level policies: deferred; configuration remains global-only for now.
+- Retention: manual passable-terminal purge only.
+- API keys: config-only worker/admin keys.
 
 ## Deferred Decisions
 

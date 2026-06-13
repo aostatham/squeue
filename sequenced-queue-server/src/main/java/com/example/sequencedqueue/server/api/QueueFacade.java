@@ -98,6 +98,10 @@ public class QueueFacade {
         return response;
     }
 
+    public RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request, String actorId) {
+        return queueService.purgeRetention(queueName, request, actorId);
+    }
+
     public List<AdminAuditResponse> adminAudit(String queueName, int limit, int offset) {
         return queueService.adminAudit(queueName, limit, offset);
     }

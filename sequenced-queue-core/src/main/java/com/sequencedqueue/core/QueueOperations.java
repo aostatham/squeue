@@ -42,6 +42,10 @@ public interface QueueOperations {
 
     ItemResponse cancel(String queueName, UUID itemId, String actorId, String reason);
 
+    RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request);
+
+    RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request, String actorId);
+
     List<AdminAuditResponse> adminAudit(String queueName, int limit, int offset);
 
     int recoverExpiredLeases();

@@ -161,7 +161,7 @@ Stage 3A scope:
 - admin audit focused on admin mutations
 - direct Java client remains thin over `sequenced-queue-core`
 - structured logging and migration discipline
-- manual retention purge only if implemented later in this pass
+- manual retention purge only; no scheduler or archive table
 
 Explicitly deferred from Stage 3A:
 
@@ -176,6 +176,7 @@ Explicitly deferred from Stage 3A:
 - full API-key lifecycle
 - OAuth/OIDC
 - archive tables
+- automated retention/archive policy
 
 ## Stage 3B - Broader Production Hardening
 
@@ -186,7 +187,6 @@ Potential later hardening:
 - richer deployment guidance
 - least-privilege database role guidance
 - operational runbooks
-- manual retention purge if Stage 3A does not include it
 - structured logging conventions
 - migration compatibility policy
 - additional admin inspection filters

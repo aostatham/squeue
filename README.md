@@ -100,11 +100,15 @@ Retryable failures become `retry_wait` until attempts are exhausted. Exhausted r
 
 Successful admin repair operations are written to `queue_admin_audit`. See [docs/semantics.md](docs/semantics.md) for canonical retry, lease, recovery, and admin repair detail.
 
+Manual retention purge is available through the admin API. It deletes only old passable terminal rows (`succeeded`, `cancelled`, `skipped`, `failed`) and never purges `pending`, `processing`, `retry_wait`, or `dead_lettered`.
+
 ## REST API and Security
 
 Worker endpoints live under `/queues/{queueName}` and require `Authorization: Bearer <sequenced-queue.api-key>`. The admin API key can also call worker endpoints.
 
 Admin endpoints live under `/admin/queues/{queueName}` and require `Authorization: Bearer <sequenced-queue.admin-api-key>`. The server fails startup if the worker and admin API keys are equal. This is a simple static/configured API key model; it is not OAuth/OIDC, full API-key lifecycle management, key rotation, hashed key storage, or production-grade identity management.
+
+Queue configuration is global-only. There is no `queue_config` table or queue-level database policy model.
 
 REST errors use a stable shape:
 
@@ -169,9 +173,9 @@ List endpoints support `limit` and `offset`.
 
 The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
 
-The database must already have the `sequenced-queue-core` Flyway migrations applied. The current direct Java client requires schema version `2`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
+The database must already have the `sequenced-queue-core` Flyway migrations applied. The current direct Java client requires schema version `3`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
 
-Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, idempotency handling, per-source sequence assignment, and schema version lookup.
+Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, manual retention purge, idempotency handling, per-source sequence assignment, and schema version lookup.
 
 ## Python REST Client
 

@@ -146,6 +146,7 @@ class DefaultQueueServiceTest {
         assertBadRequest(() -> service.complete("q", UUID.randomUUID(), null));
         assertBadRequest(() -> service.fail("q", UUID.randomUUID(), null));
         assertBadRequest(() -> service.heartbeat("q", UUID.randomUUID(), null));
+        assertBadRequest(() -> service.purgeRetention("q", null));
     }
 
     @Test
@@ -158,6 +159,46 @@ class DefaultQueueServiceTest {
         assertBadRequest(() -> service.heartbeat("q", UUID.randomUUID(), new HeartbeatRequest("worker-1", 0)));
         assertBadRequest(() -> service.heartbeat("q", UUID.randomUUID(), new HeartbeatRequest("worker-1", -1)));
         assertBadRequest(() -> service.fail("q", UUID.randomUUID(), new FailRequest("worker-1", UUID.randomUUID(), true, "ERR", "bad", -1)));
+    }
+
+    @Test
+    void retentionPurgeRejectsBlockingStatuses() {
+        DefaultQueueService service = service(new FakeRepository());
+
+        assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("pending"), false, "cleanup")));
+        assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("processing"), false, "cleanup")));
+        assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("retry_wait"), false, "cleanup")));
+        assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("dead_lettered"), false, "cleanup")));
+    }
+
+    @Test
+    void retentionDryRunCountsWithoutDeletingOrAuditing() {
+        FakeRepository repository = new FakeRepository();
+        repository.retentionMatched = 7;
+        DefaultQueueService service = service(repository);
+
+        RetentionPurgeResponse response = service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded", "failed"), true, "cleanup"), "admin-api-key");
+
+        assertEquals(7, response.matched());
+        assertEquals(0, response.deleted());
+        assertEquals(0, repository.retentionDeleteCalls);
+        assertEquals(0, repository.adminAuditCalls);
+    }
+
+    @Test
+    void retentionActualPurgeDeletesEligibleStatusesAndWritesAudit() {
+        FakeRepository repository = new FakeRepository();
+        repository.retentionMatched = 5;
+        repository.retentionDeleted = 4;
+        DefaultQueueService service = service(repository);
+
+        RetentionPurgeResponse response = service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded", "cancelled", "skipped", "failed"), false, "cleanup"), "admin-api-key");
+
+        assertEquals(5, response.matched());
+        assertEquals(4, response.deleted());
+        assertEquals(1, repository.retentionDeleteCalls);
+        assertEquals(1, repository.adminAuditCalls);
+        assertEquals("retention_purge", repository.auditRows.getFirst().operation());
     }
 
     private DefaultQueueService service(FakeRepository repository) {
@@ -201,6 +242,9 @@ class DefaultQueueServiceTest {
         int adminStatusCalls;
         int skipDeadLetteredHeadCalls;
         int adminAuditCalls;
+        int retentionDeleteCalls;
+        long retentionMatched;
+        long retentionDeleted;
         UUID lastMatchedLeaseId;
         final List<QueueItemRow> expiredItems = new ArrayList<>();
         final List<AdminAuditRow> auditRows = new ArrayList<>();
@@ -353,13 +397,24 @@ class DefaultQueueServiceTest {
         }
 
         @Override
+        public long countRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+            return retentionMatched;
+        }
+
+        @Override
+        public long deleteRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+            retentionDeleteCalls++;
+            return retentionDeleted;
+        }
+
+        @Override
         public QueueMetricsSnapshot metricsSnapshot() {
             return new QueueMetricsSnapshot(0, 0, 0, 0, 0, 0, 0);
         }
 
         @Override
         public QueueSchemaInfo getSchemaInfo() {
-            return new QueueSchemaInfo("2");
+            return new QueueSchemaInfo("3");
         }
     }
 }

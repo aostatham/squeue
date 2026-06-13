@@ -142,6 +142,19 @@ public class SequencedQueueDirectClient {
         }
     }
 
+    public RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request) {
+        try {
+            QueueDtos.RetentionPurgeRequest coreRequest = request == null
+                ? null
+                : new QueueDtos.RetentionPurgeRequest(request.olderThan(), request.statuses(), request.dryRun(), request.reason());
+            QueueDtos.RetentionPurgeResponse response = queueOperations.purgeRetention(queueName,
+                coreRequest);
+            return new RetentionPurgeResponse(response.queueName(), response.dryRun(), response.matched(), response.deleted());
+        } catch (com.sequencedqueue.core.QueueException e) {
+            throw mapCoreException(e);
+        }
+    }
+
     public void recoverExpiredLeases() {
         try {
             queueOperations.recoverExpiredLeases();

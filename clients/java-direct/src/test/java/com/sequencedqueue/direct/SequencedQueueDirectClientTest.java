@@ -190,7 +190,7 @@ class SequencedQueueDirectClientTest {
 
     @Test
     void directClientReadsFlywaySchemaVersion() {
-        assertEquals("2", client.getSchemaInfo().schemaVersion());
+        assertEquals("3", client.getSchemaInfo().schemaVersion());
     }
 
     @Test

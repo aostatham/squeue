@@ -171,6 +171,76 @@ class QueueApiIntegrationTest {
     }
 
     @Test
+    void adminRetentionDryRunCountsWithoutDeleting() throws Exception {
+        oldItem("retention-dry-run", "succeeded");
+
+        ResponseEntity<Map> purge = post("/admin/queues/" + QUEUE + "/retention/purge",
+            Map.of("olderThan", "2999-01-01T00:00:00Z", "statuses", List.of("succeeded"), "dryRun", true, "reason", "dry run"),
+            Map.class,
+            adminHeaders());
+
+        assertEquals(HttpStatus.OK, purge.getStatusCode());
+        assertEquals(true, purge.getBody().get("dryRun"));
+        assertEquals(1, ((Number) purge.getBody().get("matched")).intValue());
+        assertEquals(0, ((Number) purge.getBody().get("deleted")).intValue());
+        assertEquals(1, countWhere("queue_item", "source_id = 'retention-dry-run'"));
+        assertEquals(0, countWhere("queue_admin_audit", "operation = 'retention_purge'"));
+    }
+
+    @Test
+    void adminRetentionPurgeDeletesOnlyEligibleTerminalRowsAndWritesAudit() throws Exception {
+        oldItem("retention-succeeded", "succeeded");
+        oldItem("retention-cancelled", "cancelled");
+        oldItem("retention-skipped", "skipped");
+        oldItem("retention-failed", "failed");
+        oldItem("retention-pending", "pending");
+        oldItem("retention-processing", "processing");
+        oldItem("retention-retry", "retry_wait");
+        oldItem("retention-dead-lettered", "dead_lettered");
+
+        ResponseEntity<Map> purge = post("/admin/queues/" + QUEUE + "/retention/purge",
+            Map.of("olderThan", "2999-01-01T00:00:00Z", "statuses", List.of("succeeded", "cancelled", "skipped", "failed"), "dryRun", false, "reason", "cleanup"),
+            Map.class,
+            adminHeaders());
+
+        assertEquals(HttpStatus.OK, purge.getStatusCode());
+        assertEquals(false, purge.getBody().get("dryRun"));
+        assertEquals(4, ((Number) purge.getBody().get("matched")).intValue());
+        assertEquals(4, ((Number) purge.getBody().get("deleted")).intValue());
+        assertEquals(4, countWhere("queue_item", "true"));
+        assertEquals(1, countWhere("queue_item", "status = 'pending'"));
+        assertEquals(1, countWhere("queue_item", "status = 'processing'"));
+        assertEquals(1, countWhere("queue_item", "status = 'retry_wait'"));
+        assertEquals(1, countWhere("queue_item", "status = 'dead_lettered'"));
+        assertEquals(1, countWhere("queue_admin_audit", "operation = 'retention_purge' AND reason = 'cleanup'"));
+    }
+
+    @Test
+    void adminRetentionRejectsBlockingStatuses() {
+        ResponseEntity<Map> purge = post("/admin/queues/" + QUEUE + "/retention/purge",
+            Map.of("olderThan", "2999-01-01T00:00:00Z", "statuses", List.of("dead_lettered"), "dryRun", false, "reason", "bad"),
+            Map.class,
+            adminHeaders());
+
+        assertEquals(HttpStatus.BAD_REQUEST, purge.getStatusCode());
+        assertEquals("VALIDATION_ERROR", purge.getBody().get("errorCode"));
+    }
+
+    @Test
+    void lifecycleOperationsDoNotWriteAdminAudit() throws Exception {
+        UUID itemId = UUID.fromString((String) enqueue("audit-complete", 5).getBody().get("itemId"));
+        Map<String, Object> completeClaim = claim("worker-complete").getBody();
+        post("/queues/" + QUEUE + "/leases/" + completeClaim.get("leaseId") + "/heartbeat", Map.of("workerId", "worker-complete", "extendBySeconds", 60), Void.class);
+        post("/queues/" + QUEUE + "/items/" + itemId + "/complete", Map.of("workerId", "worker-complete", "leaseId", completeClaim.get("leaseId"), "result", Map.of()), Map.class);
+
+        UUID failedId = UUID.fromString((String) enqueue("audit-fail", 5).getBody().get("itemId"));
+        Map<String, Object> failClaim = claim("worker-fail").getBody();
+        post("/queues/" + QUEUE + "/items/" + failedId + "/fail", Map.of("workerId", "worker-fail", "leaseId", failClaim.get("leaseId"), "retryable", false, "errorType", "ERR", "errorMessage", "failed"), Map.class);
+
+        assertEquals(0, countWhere("queue_admin_audit", "true"));
+    }
+
+    @Test
     void actuatorHealthIncludesQueueDetails() {
         ResponseEntity<Map> health = get("/actuator/health", Map.class, new HttpHeaders());
 
@@ -183,8 +253,8 @@ class QueueApiIntegrationTest {
         assertEquals(true, details.get("queueItemTablePresent"));
         assertEquals(true, details.get("queueSourceStateTablePresent"));
         assertEquals(true, details.get("adminAuditTablePresent"));
-        assertEquals("2", details.get("schemaVersion"));
-        assertEquals("2", details.get("requiredSchemaVersion"));
+        assertEquals("3", details.get("schemaVersion"));
+        assertEquals("3", details.get("requiredSchemaVersion"));
         assertEquals(true, details.get("schemaCurrent"));
         assertEquals(true, details.get("recoveryEnabled"));
     }
@@ -337,6 +407,20 @@ class QueueApiIntegrationTest {
         execute("UPDATE queue_item SET status = 'dead_lettered' WHERE item_id = '" + itemId + "'");
         execute("UPDATE queue_source_state SET status = 'blocked' WHERE source_id = '" + sourceId + "'");
         return itemId;
+    }
+
+    private void oldItem(String sourceId, String status) throws Exception {
+        enqueue(sourceId, 5);
+        execute("UPDATE queue_item SET status = '" + status + "', updated_at = now() - interval '10 days' WHERE source_id = '" + sourceId + "'");
+    }
+
+    private static int countWhere(String table, String where) throws Exception {
+        try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT count(*) FROM " + table + " WHERE " + where)) {
+            resultSet.next();
+            return resultSet.getInt(1);
+        }
     }
 
     private String url(String path) {

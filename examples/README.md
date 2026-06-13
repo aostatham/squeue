@@ -4,6 +4,8 @@ These examples are intentionally small and runnable from the repository root. Th
 
 For delivery guarantees and non-guarantees, see [Semantics](../docs/semantics.md).
 
+Admin operations, manual retention purge, and the `failed` versus `dead_lettered` distinction are defined in [Semantics](../docs/semantics.md). Examples intentionally avoid queue-level configuration, batching, archive tables, and UI flows.
+
 From a clean checkout, build the local Java artifacts and install the Python client dependencies first:
 
 ```sh

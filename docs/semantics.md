@@ -109,10 +109,52 @@ Admin repair operations are:
 
 Successful admin repair operations are audited.
 
+## Admin Audit
+
+Admin audit is written only for successful admin mutations:
+
+- `retry`
+- `skip`
+- `cancel`
+- `unblock`
+- retention `purge` when `dryRun` is false
+
+Normal worker and producer operations do not write admin audit rows. This includes enqueue, claim, complete, fail, and heartbeat.
+
+## Manual Retention Purge
+
+Retention is manual only. There is no scheduler, archive table, or automatic retention policy.
+
+`POST /admin/queues/{queueName}/retention/purge` deletes old passable terminal items by `updated_at`.
+
+Eligible statuses:
+
+- `succeeded`
+- `cancelled`
+- `skipped`
+- `failed`
+
+Ineligible statuses:
+
+- `pending`
+- `processing`
+- `retry_wait`
+- `dead_lettered`
+
+`dryRun: true` counts matches without deleting rows and does not write admin audit. Actual purge writes an admin audit row.
+
+## Configuration Model
+
+Queue configuration is global-only. There is no `queue_config` table and no queue-level database policy model.
+
+Implemented global settings include default lease seconds, default max attempts, recovery enablement, and recovery cadence. Additional global limits may be added without changing queue semantics, but per-queue configuration is deferred.
+
+API key management is config-only. The server supports a WORKER key for `/queues/**` and an ADMIN key for `/admin/**`; the ADMIN key can also call worker endpoints. Keys are not stored in the queue database, and OAuth/OIDC and full key lifecycle management are out of scope.
+
 ## REST and Direct Java Access
 
 The REST server delegates queue operations to `sequenced-queue-core`.
 
 The trusted direct Java client also delegates to `sequenced-queue-core` and uses the same production SQL and semantics. It bypasses REST API-key security and is only for trusted/internal Java deployments with direct PostgreSQL access.
 
-The direct Java client requires the core Flyway migration to be applied. The current required schema version is `2`, and `validateSchemaOnBuild(true)` fails fast when the schema is missing or incompatible.
+The direct Java client requires the core Flyway migration to be applied. The current required schema version is `3`, and `validateSchemaOnBuild(true)` fails fast when the schema is missing or incompatible.

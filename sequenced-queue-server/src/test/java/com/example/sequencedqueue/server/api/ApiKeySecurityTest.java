@@ -61,6 +61,29 @@ class ApiKeySecurityTest {
     }
 
     @Test
+    void queueEndpointRejectsInvalidApiKeyAsUnauthorized() {
+        ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items",
+            Map.of("sourceId", "source-1", "itemType", "type", "payload", Map.of(), "headers", Map.of()),
+            Map.class,
+            bearer("not-a-configured-key"));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals("UNAUTHORIZED", response.getBody().get("errorCode"));
+        assertEquals("invalid api key", response.getBody().get("message"));
+    }
+
+    @Test
+    void queueEndpointRejectsDisabledApiKeyAsUnauthorized() {
+        ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items",
+            Map.of("sourceId", "source-1", "itemType", "type", "payload", Map.of(), "headers", Map.of()),
+            Map.class,
+            bearer("disabled-key"));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals("UNAUTHORIZED", response.getBody().get("errorCode"));
+    }
+
+    @Test
     void queueEndpointAcceptsWorkerApiKey() {
         ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items",
             Map.of("sourceId", "source-1", "itemType", "type", "payload", Map.of(), "headers", Map.of()),
@@ -79,10 +102,34 @@ class ApiKeySecurityTest {
     }
 
     @Test
+    void adminEndpointRejectsInvalidApiKeyAsUnauthorized() {
+        ResponseEntity<Map> response = get("/admin/queues/" + QUEUE + "/blocked-sources", Map.class, bearer("not-a-configured-key"));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals("UNAUTHORIZED", response.getBody().get("errorCode"));
+        assertEquals("invalid api key", response.getBody().get("message"));
+    }
+
+    @Test
     void adminEndpointAcceptsAdminApiKey() {
         ResponseEntity<Map[]> response = get("/admin/queues/" + QUEUE + "/blocked-sources", Map[].class, bearer("dev-admin-key"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    void retentionPurgeRequiresAdminApiKey() {
+        Map<String, Object> body = Map.of("olderThan", "2999-01-01T00:00:00Z", "statuses", java.util.List.of("succeeded"), "dryRun", true, "reason", "security");
+
+        ResponseEntity<Map> missing = post("/admin/queues/" + QUEUE + "/retention/purge", body, Map.class, new HttpHeaders());
+        ResponseEntity<Map> worker = post("/admin/queues/" + QUEUE + "/retention/purge", body, Map.class, bearer("dev-key"));
+        ResponseEntity<Map> admin = post("/admin/queues/" + QUEUE + "/retention/purge", body, Map.class, bearer("dev-admin-key"));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, missing.getStatusCode());
+        assertEquals("UNAUTHORIZED", missing.getBody().get("errorCode"));
+        assertEquals(HttpStatus.FORBIDDEN, worker.getStatusCode());
+        assertEquals("FORBIDDEN", worker.getBody().get("errorCode"));
+        assertEquals(HttpStatus.OK, admin.getStatusCode());
     }
 
     @Test

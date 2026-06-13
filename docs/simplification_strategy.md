@@ -58,6 +58,7 @@ The following are explicitly deferred:
 - full API-key lifecycle
 - OAuth/OIDC
 - archive tables
+- automated retention/archive policy
 
 Reconsider a deferred feature only when there is a concrete operational or product need that cannot be met by the current REST API, direct Java client, admin endpoints, metrics, health, and documentation.
 
@@ -71,5 +72,5 @@ Stage 3A Minimal Production Hardening should keep the system deployable and unde
 - clarify `failed` vs `dead_lettered`
 - keep admin audit focused on admin mutations
 - keep the direct Java client thin over `sequenced-queue-core`
-- add manual retention purge only if needed in the hardening pass
+- add manual retention purge only; no scheduler or archive table
 - avoid expanding product surface into deferred areas

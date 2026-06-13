@@ -55,13 +55,17 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         }
 
         if (path.startsWith("/admin/")) {
-            if (!adminApiKey.equals(bearerToken)) {
+            if (apiKey.equals(bearerToken)) {
                 writeError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "admin api key required");
+                return;
+            }
+            if (!adminApiKey.equals(bearerToken)) {
+                writeError(response, HttpServletResponse.SC_UNAUTHORIZED, "UNAUTHORIZED", "invalid api key");
                 return;
             }
             request.setAttribute(ACTOR_ID_ATTRIBUTE, "admin-api-key");
         } else if (!apiKey.equals(bearerToken) && !adminApiKey.equals(bearerToken)) {
-            writeError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "invalid api key");
+            writeError(response, HttpServletResponse.SC_UNAUTHORIZED, "UNAUTHORIZED", "invalid api key");
             return;
         } else {
             request.setAttribute(ACTOR_ID_ATTRIBUTE, adminApiKey.equals(bearerToken) ? "admin-api-key" : "api-key");

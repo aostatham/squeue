@@ -448,6 +448,31 @@ public class PostgresQueueRepository implements QueueRepository {
     }
 
     @Override
+    public long countRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+        String placeholders = statusPlaceholders(statuses);
+        List<Object> args = retentionArgs(queueName, olderThan, statuses);
+        return query("""
+            SELECT count(*) AS row_count
+            FROM queue_item
+            WHERE queue_name = ?
+              AND updated_at < ?
+              AND status IN (%s)
+            """.formatted(placeholders), rs -> rs.getLong("row_count"), args.toArray()).getFirst();
+    }
+
+    @Override
+    public long deleteRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+        String placeholders = statusPlaceholders(statuses);
+        List<Object> args = retentionArgs(queueName, olderThan, statuses);
+        return update("""
+            DELETE FROM queue_item
+            WHERE queue_name = ?
+              AND updated_at < ?
+              AND status IN (%s)
+            """.formatted(placeholders), args.toArray());
+    }
+
+    @Override
     public QueueDtos.QueueMetricsSnapshot metricsSnapshot() {
         return query("""
             SELECT
@@ -473,14 +498,38 @@ public class PostgresQueueRepository implements QueueRepository {
     @Override
     public QueueSchemaInfo getSchemaInfo() {
         return query("""
-            SELECT version
-            FROM flyway_schema_history
-            WHERE success = true
-            ORDER BY installed_rank DESC
-            LIMIT 1
-            """, rs -> new QueueSchemaInfo(rs.getString("version"))).stream()
-            .findFirst()
-            .orElseGet(() -> new QueueSchemaInfo(null));
+            SELECT
+                (
+                    SELECT version
+                    FROM flyway_schema_history
+                    WHERE success = true
+                    ORDER BY installed_rank DESC
+                    LIMIT 1
+                ) AS schema_version,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'queue_item'
+                ) AS queue_item_table_present,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'queue_source_state'
+                ) AS queue_source_state_table_present,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'queue_admin_audit'
+                ) AS admin_audit_table_present
+            """, rs -> new QueueSchemaInfo(
+                rs.getString("schema_version"),
+                rs.getBoolean("queue_item_table_present"),
+                rs.getBoolean("queue_source_state_table_present"),
+                rs.getBoolean("admin_audit_table_present")
+            )).getFirst();
     }
 
     private <T> T queryOne(String sql, RowMapper<T> mapper, Object... args) {
@@ -519,6 +568,21 @@ public class PostgresQueueRepository implements QueueRepository {
         for (int i = 0; i < args.length; i++) {
             statement.setObject(i + 1, args[i]);
         }
+    }
+
+    private String statusPlaceholders(List<ItemStatus> statuses) {
+        if (statuses == null || statuses.isEmpty()) {
+            throw new QueueException(QueueException.BAD_REQUEST, "statuses is required");
+        }
+        return String.join(",", statuses.stream().map(status -> "?").toList());
+    }
+
+    private List<Object> retentionArgs(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+        List<Object> args = new ArrayList<>();
+        args.add(queueName);
+        args.add(olderThan);
+        args.addAll(statuses.stream().map(Enum::name).toList());
+        return args;
     }
 
     private Connection connection() {

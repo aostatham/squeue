@@ -141,6 +141,18 @@ curl -X POST \
   "http://localhost:8080/admin/queues/wf.commands/items/{itemId}/skip"
 ```
 
+Manual retention purge is admin-only and deletes only old passable terminal rows. Dry-run first:
+
+```sh
+curl -X POST \
+  -H "Authorization: Bearer dev-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{"olderThan":"2026-01-01T00:00:00Z","statuses":["succeeded","cancelled","skipped","failed"],"dryRun":true,"reason":"quickstart preview"}' \
+  "http://localhost:8080/admin/queues/wf.commands/retention/purge"
+```
+
+See [Semantics](semantics.md) for passable terminal status rules and audit behavior.
+
 ## Java REST Client Usage
 
 ```java
@@ -172,7 +184,7 @@ SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
     .build();
 ```
 
-The direct client delegates to `sequenced-queue-core`. It requires schema version `2`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema version is not `2`, the builder throws `QueueUnavailableException` and the client is not created.
+The direct client delegates to `sequenced-queue-core`. It requires schema version `3`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema version is not `3`, the builder throws `QueueUnavailableException` and the client is not created.
 
 For long-running direct workers, prefer the helper:
 
