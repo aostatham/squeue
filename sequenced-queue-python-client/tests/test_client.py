@@ -8,6 +8,12 @@ class FakeClient:
     def __init__(self):
         self.completed = []
         self.failed = []
+        self.claims = []
+
+    def claim(self, queue_name, worker_id, supported_item_types, lease_seconds):
+        if self.claims:
+            return self.claims.pop(0)
+        return {"items": []}
 
     def complete(self, queue_name, item_id, worker_id, lease_id, result):
         self.completed.append((queue_name, item_id, worker_id, lease_id, result))
@@ -31,6 +37,23 @@ def test_worker_completes_successful_handler():
 
     assert client.completed == [("q", "item-1", "w1", "lease-1", {"ok": True})]
     assert client.failed == []
+
+
+def test_worker_run_once_returns_true_only_when_item_was_handled():
+    client = FakeClient()
+    client.claims.append({
+        "leaseId": "lease-1",
+        "items": [{"itemId": "item-1", "sequenceNo": 1, "itemType": "type", "payload": {"ok": True}, "headers": {}}],
+    })
+    worker = SequencedQueueWorker(client, "q", "w1", ["type"], 60)
+
+    @worker.handler("type")
+    def handle(item: QueueItem):
+        return {"ok": item.payload["ok"]}
+
+    assert worker.run_once() is True
+    assert worker.run_once() is False
+    assert client.completed == [("q", "item-1", "w1", "lease-1", {"ok": True})]
 
 
 def test_worker_marks_retryable_exception_retryable():

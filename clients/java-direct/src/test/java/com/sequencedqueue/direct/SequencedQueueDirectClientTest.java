@@ -1,7 +1,9 @@
 package com.sequencedqueue.direct;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.PrintWriter;
 import java.sql.Connection;
@@ -191,6 +193,28 @@ class SequencedQueueDirectClientTest {
         assertEquals("2", client.getSchemaInfo().schemaVersion());
     }
 
+    @Test
+    void directWorkerRunOnceCompletesOneItemAgainstFlywayManagedPostgres() {
+        EnqueueResponse enqueued = client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-direct-worker")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        SequencedQueueDirectWorker worker = client.worker("wf.commands")
+            .workerId("direct-worker-1")
+            .leaseSeconds(60)
+            .handler("wf.command", item -> DirectQueueResult.success(Map.of("handledBy", "direct-worker-1")))
+            .build();
+
+        assertTrue(worker.runOnce());
+        assertFalse(worker.runOnce());
+        ClaimResponse nextClaim = client.claim("wf.commands", new ClaimRequest("worker-2", List.of("wf.command"), 60, 1));
+
+        assertTrue(nextClaim.items().isEmpty());
+        assertEquals("succeeded", itemStatus(enqueued.itemId()));
+    }
+
     private static void applySchema(DataSource dataSource) throws Exception {
         Flyway.configure()
             .dataSource(dataSource)
@@ -203,6 +227,17 @@ class SequencedQueueDirectClientTest {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute(sql);
+        }
+    }
+
+    private static String itemStatus(java.util.UUID itemId) {
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement();
+             var resultSet = statement.executeQuery("SELECT status FROM queue_item WHERE item_id = '" + itemId + "'")) {
+            resultSet.next();
+            return resultSet.getString("status");
+        } catch (SQLException e) {
+            throw new AssertionError(e);
         }
     }
 

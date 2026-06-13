@@ -2,6 +2,24 @@
 
 This guide shows the Stage 2 developer path: start PostgreSQL, run the server, enqueue work, run Java and Python workers, and inspect operational state.
 
+For delivery guarantees and non-guarantees, see [Semantics](semantics.md). For a compact examples index, see [Examples README](../examples/README.md).
+
+Security in this quickstart uses the current static/configured API-key model. It is not OAuth/OIDC or production-grade identity management.
+
+## Bootstrap from a Clean Checkout
+
+Compile and install the local Maven modules once so example modules can resolve the local client artifacts:
+
+```sh
+./mvnw -DskipTests install
+```
+
+Install the Python client dependencies:
+
+```sh
+python -m pip install -e sequenced-queue-python-client
+```
+
 ## Start PostgreSQL
 
 ```sh
@@ -40,7 +58,7 @@ Using the Java REST producer example:
 Using the Python REST producer example:
 
 ```sh
-PYTHONPATH=sequenced-queue-python-client python examples/python-producer/producer.py
+python examples/python-producer/producer.py
 ```
 
 Both examples enqueue item type `example.command` into queue `wf.commands` for source `example-source` unless environment variables override the defaults.
@@ -48,28 +66,49 @@ Both examples enqueue item type `example.command` into queue `wf.commands` for s
 ## Run a Java REST Worker
 
 ```sh
-./mvnw -pl examples/java-rest-worker exec:java
+SQ_RUN_ONCE=true ./mvnw -pl examples/java-rest-worker exec:java
 ```
 
-The Java REST worker uses `SequencedQueueWorker`, claims one head item at a time, heartbeats halfway through the lease, completes successful handler results, and fails handler errors according to `QueueResult`.
+The Java REST worker uses `SequencedQueueWorker`, claims one head item at a time, heartbeats halfway through the lease, completes successful handler results, and fails handler errors according to `QueueResult`. Set `SQ_RUN_ONCE=true` for a deterministic quickstart run, or omit it to poll until stopped.
 
 ## Run a Python REST Worker
 
 ```sh
-PYTHONPATH=sequenced-queue-python-client python examples/python-worker/worker.py
+SQ_RUN_ONCE=true python examples/python-worker/worker.py
 ```
 
-The Python worker uses `SequencedQueueWorker`, starts a heartbeat thread for claimed work, completes successful handlers, treats `RetryableQueueError` as retryable, and treats other exceptions as non-retryable.
+The Python worker uses `SequencedQueueWorker`, starts a heartbeat thread for claimed work, completes successful handlers, treats `RetryableQueueError` as retryable, and treats other exceptions as non-retryable. Set `SQ_RUN_ONCE=true` for a deterministic quickstart run, or omit it to poll until stopped.
 
 ## Run a Java Direct Worker
 
 The direct Java worker bypasses the REST server and talks to PostgreSQL through `sequenced-queue-core`.
 
 ```sh
-./mvnw -pl examples/java-direct-worker exec:java
+SQ_RUN_ONCE=true ./mvnw -pl examples/java-direct-worker exec:java
 ```
 
-The direct worker requires the core Flyway schema to already be applied by the server or by your migration process. It enables `validateSchemaOnBuild(true)`, so startup fails fast if the schema is missing or incompatible.
+The direct worker requires the core Flyway schema to already be applied by the server or by your migration process. It enables `validateSchemaOnBuild(true)`, so startup fails fast if the schema is missing or incompatible. It uses `SequencedQueueDirectWorker` for automatic heartbeat, lease-lost detection, complete/fail suppression after lease loss, graceful shutdown, and empty-queue backoff.
+
+## Run Tests
+
+Run the Java reactor tests:
+
+```sh
+./mvnw test
+```
+
+Run the required Docker-backed PostgreSQL contract suite:
+
+```sh
+./mvnw verify -Ppostgres-contract
+```
+
+Run Python client tests:
+
+```sh
+cd sequenced-queue-python-client
+python -m pytest
+```
 
 ## Inspect Dead-Letter and Admin State
 
@@ -135,6 +174,21 @@ SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
 
 The direct client delegates to `sequenced-queue-core`. It requires schema version `2`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema version is not `2`, the builder throws `QueueUnavailableException` and the client is not created.
 
+For long-running direct workers, prefer the helper:
+
+```java
+SequencedQueueDirectWorker worker = client.worker("wf.commands")
+    .workerId("direct-worker-1")
+    .leaseSeconds(30)
+    .handler("example.command", item ->
+        DirectQueueResult.success(Map.of("handledBy", "direct-worker-1")))
+    .build();
+
+worker.runOnce();
+worker.runForever();
+worker.stop();
+```
+
 ## Python REST Client Usage
 
 ```python
@@ -160,6 +214,8 @@ Workers repeatedly:
 5. Stop heartbeat after the handler finishes.
 
 Empty claims use backoff so idle workers do not spin aggressively.
+
+REST and direct Java workers expose `runOnce()` for tests, examples, and deterministic operational checks. `runOnce()` returns `true` after handling one claimed item and `false` when no item is available.
 
 ## Heartbeat and Lease-Lost Behaviour
 

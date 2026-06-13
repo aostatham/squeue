@@ -150,6 +150,10 @@ public class SequencedQueueDirectClient {
         }
     }
 
+    public SequencedQueueDirectWorker.Builder worker(String queueName) {
+        return SequencedQueueDirectWorker.builder(this, queueName);
+    }
+
     private QueueDtos.EnqueueRequest toCoreRequest(EnqueueRequest request) {
         validateRequest(request);
         return new QueueDtos.EnqueueRequest(

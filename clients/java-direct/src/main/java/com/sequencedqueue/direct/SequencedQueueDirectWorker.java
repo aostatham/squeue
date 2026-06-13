@@ -1,6 +1,4 @@
-package com.example.sequencedqueue.client;
-
-import static com.example.sequencedqueue.client.SequencedQueueClient.*;
+package com.sequencedqueue.direct;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -13,16 +11,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
-public class SequencedQueueWorker implements AutoCloseable {
-    private final SequencedQueueClient client;
+public final class SequencedQueueDirectWorker implements AutoCloseable {
+    private final SequencedQueueDirectClient client;
     private final String queueName;
     private final String workerId;
     private final List<String> supportedItemTypes;
     private final int leaseSeconds;
-    private final Map<String, Function<ClaimItem, QueueResult>> handlers;
+    private final Map<String, Function<ClaimItem, DirectQueueResult>> handlers;
     private volatile boolean running = true;
 
-    private SequencedQueueWorker(Builder builder) {
+    private SequencedQueueDirectWorker(Builder builder) {
         this.client = builder.client;
         this.queueName = builder.queueName;
         this.workerId = builder.workerId;
@@ -31,7 +29,7 @@ public class SequencedQueueWorker implements AutoCloseable {
         this.handlers = Map.copyOf(builder.handlers);
     }
 
-    public static Builder builder(SequencedQueueClient client, String queueName) {
+    public static Builder builder(SequencedQueueDirectClient client, String queueName) {
         return new Builder(client, queueName);
     }
 
@@ -83,7 +81,7 @@ public class SequencedQueueWorker implements AutoCloseable {
         );
         try {
             ClaimItem item = claim.items().getFirst();
-            Function<ClaimItem, QueueResult> handler = handlers.get(item.itemType());
+            Function<ClaimItem, DirectQueueResult> handler = handlers.get(item.itemType());
             if (handler == null) {
                 if (leaseLost.get()) {
                     return;
@@ -91,7 +89,7 @@ public class SequencedQueueWorker implements AutoCloseable {
                 client.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), false, "NO_HANDLER", "No handler for " + item.itemType(), null));
                 return;
             }
-            QueueResult result = handler.apply(item);
+            DirectQueueResult result = handler.apply(item);
             if (leaseLost.get()) {
                 return;
             }
@@ -120,14 +118,14 @@ public class SequencedQueueWorker implements AutoCloseable {
     }
 
     public static final class Builder {
-        private final SequencedQueueClient client;
+        private final SequencedQueueDirectClient client;
         private final String queueName;
         private String workerId;
         private int leaseSeconds = 60;
         private final List<String> supportedItemTypes = new ArrayList<>();
-        private final Map<String, Function<ClaimItem, QueueResult>> handlers = new HashMap<>();
+        private final Map<String, Function<ClaimItem, DirectQueueResult>> handlers = new HashMap<>();
 
-        private Builder(SequencedQueueClient client, String queueName) {
+        private Builder(SequencedQueueDirectClient client, String queueName) {
             this.client = client;
             this.queueName = queueName;
         }
@@ -147,20 +145,20 @@ public class SequencedQueueWorker implements AutoCloseable {
             return this;
         }
 
-        public Builder handler(String itemType, Function<ClaimItem, QueueResult> handler) {
+        public Builder handler(String itemType, Function<ClaimItem, DirectQueueResult> handler) {
             this.supportedItemTypes.add(itemType);
             this.handlers.put(itemType, handler);
             return this;
         }
 
-        public SequencedQueueWorker build() {
+        public SequencedQueueDirectWorker build() {
             if (workerId == null || workerId.isBlank()) {
                 throw new IllegalArgumentException("workerId is required");
             }
             if (supportedItemTypes.isEmpty()) {
                 throw new IllegalArgumentException("at least one supported item type is required");
             }
-            return new SequencedQueueWorker(this);
+            return new SequencedQueueDirectWorker(this);
         }
     }
 }

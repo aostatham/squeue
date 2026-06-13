@@ -14,6 +14,15 @@ The queue guarantees durable at-least-once delivery and strict per-source proces
 
 It does not guarantee exactly-once side effects. Handlers must be idempotent.
 
+Project status:
+
+```text
+Stage 0 - Correctness Foundation: passed
+Stage 1 - Operational Readiness Baseline: passed
+Stage 2 - Developer Experience Baseline: passed
+Current focus - Simplification / Stage 3A Minimal Production Hardening
+```
+
 ## Modules
 
 - `sequenced-queue-core`: shared queue implementation, Flyway schema migration, plain JDBC PostgreSQL repository, transaction abstraction, leases, retries, dead-letter handling, and admin repair semantics.
@@ -23,6 +32,16 @@ It does not guarantee exactly-once side effects. Handlers must be idempotent.
 - `sequenced-queue-python-client`: Python HTTP client and polling worker helper.
 - `docs/openapi.yaml`: MVP HTTP API description.
 - `examples`: runnable Java and Python producer/worker examples.
+
+## Documentation
+
+- [Developer Quickstart](docs/developer_quickstart.md)
+- [Canonical Semantics](docs/semantics.md)
+- [Simplification Strategy](docs/simplification_strategy.md)
+- [OpenAPI Contract](docs/openapi.yaml)
+- [Examples README](examples/README.md)
+- [Product Roadmap](docs/sequenced_queue_product_roadmap.md)
+- [Decision Log](docs/DECISIONS.md)
 
 ## Local Run
 
@@ -67,31 +86,25 @@ For a runnable producer/worker walkthrough, see [Developer Quickstart](docs/deve
 - No broker/pub-sub/fanout semantics.
 - Idempotent enqueue when `idempotencyKey` is supplied.
 - Worker leases with heartbeat.
-- Expired lease recovery moves processing work to `retry_wait` or `dead_lettered`.
-- Dead-lettered head items block their source until admin retry, skip, or cancel.
+- Dead-lettered head items block their source until admin repair.
 
 Consumers must use idempotent handlers because worker crashes can cause duplicate delivery.
 
+The canonical semantics document is [docs/semantics.md](docs/semantics.md).
+
 ## Lease and Retry Model
 
-Claiming work leases one source and its current head item. A worker must complete, fail, or heartbeat with the matching `workerId` and `leaseId`. If the lease expires, recovery can move the item to `retry_wait` or `dead_lettered` while preserving the per-source ordering invariant.
+Claiming work leases one source and its current head item. A worker must complete, fail, or heartbeat with the matching `workerId` and `leaseId`.
 
-Retryable failures become `retry_wait` until attempts are exhausted. Exhausted retryable failures become `dead_lettered` and block the source. Non-retryable failures become `failed`; failed, skipped, cancelled, and succeeded items are passable terminal states.
+Retryable failures become `retry_wait` until attempts are exhausted. Exhausted retryable failures become `dead_lettered` and block the source. Non-retryable failures become `failed`; `failed`, `skipped`, `cancelled`, and `succeeded` are passable terminal states.
 
-Admin repair operations are:
-
-- retry: move a dead-lettered head item to `retry_wait`;
-- skip: mark a pending, retry-wait, or dead-lettered head item `skipped`;
-- cancel: mark a pending, retry-wait, or dead-lettered head item `cancelled`;
-- unblock: release a blocked source only after no blocking head item remains.
-
-Successful admin repair operations are written to `queue_admin_audit` in the same transaction as the repair.
+Successful admin repair operations are written to `queue_admin_audit`. See [docs/semantics.md](docs/semantics.md) for canonical retry, lease, recovery, and admin repair detail.
 
 ## REST API and Security
 
 Worker endpoints live under `/queues/{queueName}` and require `Authorization: Bearer <sequenced-queue.api-key>`. The admin API key can also call worker endpoints.
 
-Admin endpoints live under `/admin/queues/{queueName}` and require `Authorization: Bearer <sequenced-queue.admin-api-key>`. The server fails startup if the worker and admin API keys are equal. This is a simple static API key model; it is not key rotation, hashed key storage, or production-grade identity management.
+Admin endpoints live under `/admin/queues/{queueName}` and require `Authorization: Bearer <sequenced-queue.admin-api-key>`. The server fails startup if the worker and admin API keys are equal. This is a simple static/configured API key model; it is not OAuth/OIDC, full API-key lifecycle management, key rotation, hashed key storage, or production-grade identity management.
 
 REST errors use a stable shape:
 
@@ -156,7 +169,7 @@ List endpoints support `limit` and `offset`.
 
 The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
 
-The database must already have the `sequenced-queue-core` Flyway migrations applied. This client version supports schema migration `V2`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
+The database must already have the `sequenced-queue-core` Flyway migrations applied. The current direct Java client requires schema version `2`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
 
 Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, idempotency handling, per-source sequence assignment, and schema version lookup.
 

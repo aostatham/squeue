@@ -6,6 +6,9 @@ paths:
   /queues/{queueName}/items:
     post:
       summary: Enqueue an item
+      security:
+        - WorkerApiKey: []
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
       requestBody:
@@ -42,9 +45,16 @@ paths:
                     status: "pending"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /queues/{queueName}/claims:
     post:
       summary: Claim the head item for one available source
+      security:
+        - WorkerApiKey: []
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
       requestBody:
@@ -91,9 +101,16 @@ paths:
                     items: []
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /queues/{queueName}/items/{itemId}/complete:
     post:
       summary: Complete a leased item
+      security:
+        - WorkerApiKey: []
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/ItemId"
@@ -130,9 +147,16 @@ paths:
                       handledBy: "worker-1"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /queues/{queueName}/items/{itemId}/fail:
     post:
       summary: Fail a leased item
+      security:
+        - WorkerApiKey: []
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/ItemId"
@@ -178,9 +202,16 @@ paths:
                     lastErrorMessage: "remote service unavailable"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /queues/{queueName}/leases/{leaseId}/heartbeat:
     post:
       summary: Extend a worker lease
+      security:
+        - WorkerApiKey: []
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - name: leaseId
@@ -205,9 +236,16 @@ paths:
           description: Lease extended
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /queues/{queueName}/sources/{sourceId}/items:
     get:
       summary: List source items in sequence order
+      security:
+        - WorkerApiKey: []
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - name: sourceId
@@ -241,9 +279,16 @@ paths:
                       status: "pending"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /queues/{queueName}/items/{itemId}:
     get:
       summary: Get one item
+      security:
+        - WorkerApiKey: []
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/ItemId"
@@ -265,9 +310,15 @@ paths:
                     status: "pending"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/dead-lettered:
     get:
       summary: List dead-lettered items
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/Limit"
@@ -296,9 +347,15 @@ paths:
                       lastErrorMessage: "remote service unavailable"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/blocked-sources:
     get:
       summary: List blocked sources
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/Limit"
@@ -325,9 +382,15 @@ paths:
                       updatedAt: "2026-06-13T10:00:00Z"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/sources/{sourceId}/items:
     get:
       summary: List source items in sequence order for admin inspection
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - name: sourceId
@@ -361,9 +424,15 @@ paths:
                       status: "dead_lettered"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/items/{itemId}:
     get:
       summary: Get one item for admin inspection
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/ItemId"
@@ -387,9 +456,15 @@ paths:
                     maxAttempts: 5
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/audit:
     get:
       summary: List admin audit rows
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/Limit"
@@ -419,9 +494,15 @@ paths:
                       metadata: {}
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/items/{itemId}/retry:
     post:
       summary: Retry a dead-lettered head item
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/ItemId"
@@ -453,9 +534,15 @@ paths:
                     status: "retry_wait"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/items/{itemId}/skip:
     post:
       summary: Skip an item to unblock its source
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/ItemId"
@@ -487,9 +574,15 @@ paths:
                     status: "skipped"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/items/{itemId}/cancel:
     post:
       summary: Cancel an item
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/ItemId"
@@ -521,9 +614,15 @@ paths:
                     status: "cancelled"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /admin/queues/{queueName}/sources/{sourceId}/unblock:
     post:
       summary: Unblock a source after the blocking head item has been repaired
+      security:
+        - AdminApiKey: []
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - name: sourceId
@@ -561,7 +660,22 @@ paths:
                     updatedAt: "2026-06-13T10:06:00Z"
         default:
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 components:
+  securitySchemes:
+    WorkerApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+      description: Worker API key for queue operations.
+    AdminApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+      description: Admin API key for queue and admin operations.
   responses:
     Error:
       description: Structured error response
@@ -577,6 +691,35 @@ components:
                 queueName: "wf.commands"
                 sourceId: "customer-123"
                 itemId: "00000000-0000-0000-0000-000000000001"
+                details: {}
+    Unauthorized:
+      description: Missing bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missingBearerToken:
+              value:
+                errorCode: "UNAUTHORIZED"
+                message: "missing bearer token"
+                details: {}
+    Forbidden:
+      description: Invalid or insufficient API key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalidApiKey:
+              value:
+                errorCode: "FORBIDDEN"
+                message: "invalid api key"
+                details: {}
+            adminApiKeyRequired:
+              value:
+                errorCode: "FORBIDDEN"
+                message: "admin api key required"
                 details: {}
   parameters:
     QueueName:
@@ -627,7 +770,8 @@ components:
         queueName: { type: string }
         sourceId: { type: string }
         sequenceNo: { type: integer, format: int64 }
-        status: { type: string }
+        status:
+          $ref: "#/components/schemas/ItemStatus"
     ClaimRequest:
       type: object
       required: [workerId, supportedItemTypes]
@@ -682,20 +826,96 @@ components:
         extendBySeconds: { type: integer, default: 60 }
     ItemResponse:
       type: object
-      additionalProperties: true
+      required:
+        - itemId
+        - queueName
+        - sourceId
+        - sequenceNo
+        - itemType
+        - payload
+        - headers
+        - status
+        - availableAt
+        - attemptCount
+        - maxAttempts
+        - createdAt
+        - updatedAt
+      properties:
+        itemId: { type: string, format: uuid }
+        queueName: { type: string }
+        sourceId: { type: string }
+        sequenceNo: { type: integer, format: int64 }
+        itemType: { type: string }
+        payload: { type: object, additionalProperties: true }
+        headers: { type: object, additionalProperties: true }
+        status:
+          $ref: "#/components/schemas/ItemStatus"
+        availableAt: { type: string, format: date-time }
+        claimedBy: { type: string, nullable: true }
+        leaseId: { type: string, format: uuid, nullable: true }
+        leaseUntil: { type: string, format: date-time, nullable: true }
+        attemptCount: { type: integer }
+        maxAttempts: { type: integer }
+        idempotencyKey: { type: string, nullable: true }
+        lastErrorType: { type: string, nullable: true }
+        lastErrorMessage: { type: string, nullable: true }
+        result: { type: object, additionalProperties: true, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     SourceResponse:
       type: object
-      additionalProperties: true
+      required:
+        - queueName
+        - sourceId
+        - nextSequenceNo
+        - status
+        - updatedAt
+      properties:
+        queueName: { type: string }
+        sourceId: { type: string }
+        nextSequenceNo: { type: integer, format: int64 }
+        status:
+          $ref: "#/components/schemas/SourceStatus"
+        leasedBy: { type: string, nullable: true }
+        leaseId: { type: string, format: uuid, nullable: true }
+        leaseUntil: { type: string, format: date-time, nullable: true }
+        updatedAt: { type: string, format: date-time }
+    ItemStatus:
+      type: string
+      description: >
+        Item lifecycle status. succeeded, cancelled, skipped, and failed are
+        passable terminal states. failed is a terminal non-retryable failure.
+        dead_lettered is a terminal blocking failure that blocks the source
+        until admin repair.
+      enum:
+        - pending
+        - processing
+        - succeeded
+        - retry_wait
+        - failed
+        - dead_lettered
+        - cancelled
+        - skipped
+    SourceStatus:
+      type: string
+      enum:
+        - idle
+        - leased
+        - blocked
     BlockedSourceResponse:
       type: object
       properties:
         queueName: { type: string }
         sourceId: { type: string }
-        status: { type: string }
+        status:
+          $ref: "#/components/schemas/SourceStatus"
         leasedBy: { type: string, nullable: true }
         leaseUntil: { type: string, format: date-time, nullable: true }
         headItemId: { type: string, format: uuid, nullable: true }
-        headItemStatus: { type: string, nullable: true }
+        headItemStatus:
+          allOf:
+            - $ref: "#/components/schemas/ItemStatus"
+          nullable: true
         updatedAt: { type: string, format: date-time }
     AdminAuditResponse:
       type: object
@@ -707,8 +927,14 @@ components:
         queueName: { type: string }
         sourceId: { type: string, nullable: true }
         itemId: { type: string, format: uuid, nullable: true }
-        previousStatus: { type: string, nullable: true }
-        newStatus: { type: string, nullable: true }
+        previousStatus:
+          allOf:
+            - $ref: "#/components/schemas/ItemStatus"
+          nullable: true
+        newStatus:
+          allOf:
+            - $ref: "#/components/schemas/ItemStatus"
+          nullable: true
         reason: { type: string, nullable: true }
         metadata: { type: object, additionalProperties: true }
     AdminActionRequest:

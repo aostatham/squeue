@@ -124,6 +124,40 @@ class SequencedQueueClientTest {
         assertFalse(failed.get());
     }
 
+    @Test
+    void runOnceReturnsTrueOnlyWhenItemWasHandled() {
+        UUID leaseId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        AtomicInteger claims = new AtomicInteger();
+        AtomicBoolean completed = new AtomicBoolean(false);
+
+        server.createContext("/", exchange -> {
+            String path = exchange.getRequestURI().getRawPath();
+            if (path.equals("/queues/q/claims")) {
+                if (claims.getAndIncrement() == 0) {
+                    respond(exchange, 200, claimJson(leaseId, itemId));
+                } else {
+                    respond(exchange, 200, "{\"items\":[]}");
+                }
+            } else if (path.equals("/queues/q/items/" + itemId + "/complete")) {
+                completed.set(true);
+                respond(exchange, 200, "{}");
+            } else {
+                respond(exchange, 200, "{}");
+            }
+        });
+
+        SequencedQueueWorker worker = client().worker("q")
+            .workerId("w1")
+            .leaseSeconds(60)
+            .handler("type", item -> QueueResult.success(Map.of("ok", true)))
+            .build();
+
+        assertTrue(worker.runOnce());
+        assertFalse(worker.runOnce());
+        assertTrue(completed.get());
+    }
+
     private SequencedQueueClient client() {
         return SequencedQueueClient.builder()
             .baseUrl("http://127.0.0.1:" + server.getAddress().getPort())

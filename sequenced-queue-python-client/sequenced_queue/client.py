@@ -173,14 +173,19 @@ class SequencedQueueWorker:
         self._running = True
         empty_sleep = 0.1
         while self._running:
-            claim = self.client.claim(self.queue_name, self.worker_id, self.supported_item_types, self.lease_seconds)
-            items = claim.get("items") or []
-            if not items:
+            if not self.run_once():
                 time.sleep(empty_sleep)
                 empty_sleep = min(5.0, empty_sleep * 2)
                 continue
             empty_sleep = 0.1
-            self._handle_claim(claim, items[0])
+
+    def run_once(self) -> bool:
+        claim = self.client.claim(self.queue_name, self.worker_id, self.supported_item_types, self.lease_seconds)
+        items = claim.get("items") or []
+        if not items:
+            return False
+        self._handle_claim(claim, items[0])
+        return True
 
     def stop(self) -> None:
         self._running = False
