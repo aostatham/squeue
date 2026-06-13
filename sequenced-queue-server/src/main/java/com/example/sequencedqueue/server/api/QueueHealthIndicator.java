@@ -9,6 +9,7 @@ import java.util.Map;
 import javax.sql.DataSource;
 
 import com.sequencedqueue.core.QueueOperations;
+import com.sequencedqueue.core.QueueSchemaInfo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
@@ -38,13 +39,16 @@ public class QueueHealthIndicator implements HealthIndicator {
             details.put("queueItemTablePresent", tableExists(connection, "queue_item"));
             details.put("queueSourceStateTablePresent", tableExists(connection, "queue_source_state"));
             details.put("adminAuditTablePresent", tableExists(connection, "queue_admin_audit"));
-            details.put("schemaVersion", queueOperations.getSchemaInfo().schemaVersion());
+            QueueSchemaInfo schemaInfo = queueOperations.getSchemaInfo();
+            details.put("schemaVersion", schemaInfo.schemaVersion());
+            details.put("requiredSchemaVersion", QueueSchemaInfo.REQUIRED_SCHEMA_VERSION);
+            details.put("schemaCurrent", schemaInfo.isCurrent());
             details.put("recoveryEnabled", recoveryEnabled);
             boolean ready = Boolean.TRUE.equals(details.get("databaseReachable"))
                 && Boolean.TRUE.equals(details.get("queueItemTablePresent"))
                 && Boolean.TRUE.equals(details.get("queueSourceStateTablePresent"))
                 && Boolean.TRUE.equals(details.get("adminAuditTablePresent"))
-                && details.get("schemaVersion") != null
+                && Boolean.TRUE.equals(details.get("schemaCurrent"))
                 && recoveryEnabled;
             return ready ? Health.up().withDetails(details).build() : Health.outOfService().withDetails(details).build();
         } catch (Exception e) {

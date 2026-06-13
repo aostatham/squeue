@@ -14,7 +14,7 @@ public class ApiExceptionHandler {
     @ExceptionHandler(QueueException.class)
     ResponseEntity<LinkedHashMap<String, Object>> queueException(QueueException ex) {
         HttpStatus status = HttpStatus.valueOf(ex.statusCode());
-        return ResponseEntity.status(status).body(errorBody(errorCode(ex), responseMessage(ex), null, null, null));
+        return ResponseEntity.status(status).body(errorBody(errorCode(ex), responseMessage(ex), ex.queueName(), ex.sourceId(), ex.itemId() == null ? null : ex.itemId().toString()));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

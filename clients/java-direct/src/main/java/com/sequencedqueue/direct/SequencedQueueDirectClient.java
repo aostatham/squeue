@@ -16,7 +16,7 @@ import com.sequencedqueue.core.QueueOperations;
 public class SequencedQueueDirectClient {
     private static final String DEFAULT_JSON = "{}";
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
-    private static final String SUPPORTED_SCHEMA_VERSION = "2";
+    private static final String SUPPORTED_SCHEMA_VERSION = com.sequencedqueue.core.QueueSchemaInfo.REQUIRED_SCHEMA_VERSION;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 

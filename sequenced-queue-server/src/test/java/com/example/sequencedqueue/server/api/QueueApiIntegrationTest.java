@@ -45,6 +45,9 @@ class QueueApiIntegrationTest {
     @Autowired
     TestRestTemplate rest;
 
+    @Autowired
+    QueueFacade facade;
+
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
@@ -181,6 +184,8 @@ class QueueApiIntegrationTest {
         assertEquals(true, details.get("queueSourceStateTablePresent"));
         assertEquals(true, details.get("adminAuditTablePresent"));
         assertEquals("2", details.get("schemaVersion"));
+        assertEquals("2", details.get("requiredSchemaVersion"));
+        assertEquals(true, details.get("schemaCurrent"));
         assertEquals(true, details.get("recoveryEnabled"));
     }
 
@@ -203,17 +208,93 @@ class QueueApiIntegrationTest {
     void structuredErrorResponsesAreStable() {
         UUID itemId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
         claim("worker-1");
+        UUID missingId = UUID.randomUUID();
 
         ResponseEntity<Map> wrongLease = post("/queues/" + QUEUE + "/items/" + itemId + "/complete", Map.of("workerId", "worker-1", "leaseId", UUID.randomUUID(), "result", Map.of()), Map.class);
-        ResponseEntity<Map> missingItem = get("/queues/" + QUEUE + "/items/" + UUID.randomUUID(), Map.class, workerHeaders());
+        ResponseEntity<Map> missingItem = get("/queues/" + QUEUE + "/items/" + missingId, Map.class, workerHeaders());
         ResponseEntity<Map> invalidRequest = post("/queues/" + QUEUE + "/claims", Map.of("workerId", "worker-1", "supportedItemTypes", List.of("type"), "leaseSeconds", 0, "maxItems", 1), Map.class);
 
         assertEquals(HttpStatus.CONFLICT, wrongLease.getStatusCode());
         assertEquals("LEASE_LOST", wrongLease.getBody().get("errorCode"));
+        assertEquals(QUEUE, wrongLease.getBody().get("queueName"));
+        assertEquals("source-1", wrongLease.getBody().get("sourceId"));
+        assertEquals(itemId.toString(), wrongLease.getBody().get("itemId"));
         assertEquals(HttpStatus.NOT_FOUND, missingItem.getStatusCode());
         assertEquals("ITEM_NOT_FOUND", missingItem.getBody().get("errorCode"));
+        assertEquals(QUEUE, missingItem.getBody().get("queueName"));
+        assertEquals(missingId.toString(), missingItem.getBody().get("itemId"));
         assertEquals(HttpStatus.BAD_REQUEST, invalidRequest.getStatusCode());
         assertEquals("VALIDATION_ERROR", invalidRequest.getBody().get("errorCode"));
+    }
+
+    @Test
+    void blockedSourceErrorResponseIncludesContext() {
+        UUID itemId = UUID.fromString((String) enqueue("blocked-source", 1).getBody().get("itemId"));
+        Map<String, Object> claim = claim("worker-1").getBody();
+        post("/queues/" + QUEUE + "/items/" + itemId + "/fail", Map.of("workerId", "worker-1", "leaseId", claim.get("leaseId"), "retryable", true, "errorType", "ERR", "errorMessage", "failed"), Map.class);
+
+        ResponseEntity<Map> blocked = post("/admin/queues/" + QUEUE + "/sources/blocked-source/unblock", Map.of(), Map.class, adminHeaders());
+
+        assertEquals(HttpStatus.CONFLICT, blocked.getStatusCode());
+        assertEquals("SOURCE_BLOCKED", blocked.getBody().get("errorCode"));
+        assertEquals(QUEUE, blocked.getBody().get("queueName"));
+        assertEquals("blocked-source", blocked.getBody().get("sourceId"));
+        assertEquals(itemId.toString(), blocked.getBody().get("itemId"));
+    }
+
+    @Test
+    void metricsEndpointExposesOperationalCounters() throws Exception {
+        double failuresBefore = metricValue("queue.failures.total");
+        double heartbeatBefore = metricValue("queue.heartbeats.total");
+        double heartbeatFailedBefore = metricValue("queue.heartbeats.failed");
+        double leaseExpiriesBefore = metricValue("queue.lease_expiries.total");
+        double adminRetryBefore = metricValue("queue.admin.retry.total");
+        double adminSkipBefore = metricValue("queue.admin.skip.total");
+        double adminCancelBefore = metricValue("queue.admin.cancel.total");
+        double adminUnblockBefore = metricValue("queue.admin.unblock.total");
+
+        UUID failedId = UUID.fromString((String) enqueue("metrics-fail", 5).getBody().get("itemId"));
+        Map<String, Object> failClaim = claim("worker-fail").getBody();
+        post("/queues/" + QUEUE + "/items/" + failedId + "/fail", Map.of("workerId", "worker-fail", "leaseId", failClaim.get("leaseId"), "retryable", false, "errorType", "ERR", "errorMessage", "failed"), Map.class);
+
+        enqueue("metrics-heartbeat", 5);
+        Map<String, Object> heartbeatClaim = claim("worker-heartbeat").getBody();
+        post("/queues/" + QUEUE + "/leases/" + heartbeatClaim.get("leaseId") + "/heartbeat", Map.of("workerId", "worker-heartbeat", "extendBySeconds", 60), Void.class);
+
+        enqueue("metrics-heartbeat-failed", 5);
+        Map<String, Object> failedHeartbeatClaim = claim("worker-heartbeat-failed").getBody();
+        execute("UPDATE queue_item SET lease_until = now() - interval '1 second' WHERE lease_id = '" + failedHeartbeatClaim.get("leaseId") + "'");
+        execute("UPDATE queue_source_state SET lease_until = now() - interval '1 second' WHERE lease_id = '" + failedHeartbeatClaim.get("leaseId") + "'");
+        post("/queues/" + QUEUE + "/leases/" + failedHeartbeatClaim.get("leaseId") + "/heartbeat", Map.of("workerId", "worker-heartbeat-failed", "extendBySeconds", 60), Void.class);
+
+        enqueue("metrics-recovery", 5);
+        Map<String, Object> recoveryClaim = claim("worker-recovery").getBody();
+        execute("UPDATE queue_item SET lease_until = now() - interval '1 second' WHERE lease_id = '" + recoveryClaim.get("leaseId") + "'");
+        execute("UPDATE queue_source_state SET lease_until = now() - interval '1 second' WHERE lease_id = '" + recoveryClaim.get("leaseId") + "'");
+        facade.recoverExpiredLeases();
+
+        UUID retryId = makeDeadLetteredHead("metrics-retry");
+        post("/admin/queues/" + QUEUE + "/items/" + retryId + "/retry", Map.of("reason", "metric"), Map.class, adminHeaders());
+
+        UUID skipId = makeDeadLetteredHead("metrics-skip");
+        post("/admin/queues/" + QUEUE + "/items/" + skipId + "/skip", Map.of("reason", "metric"), Map.class, adminHeaders());
+
+        UUID cancelId = UUID.fromString((String) enqueue("metrics-cancel", 5).getBody().get("itemId"));
+        post("/admin/queues/" + QUEUE + "/items/" + cancelId + "/cancel", Map.of("reason", "metric"), Map.class, adminHeaders());
+
+        enqueue("metrics-unblock", 5);
+        execute("UPDATE queue_item SET status = 'skipped' WHERE source_id = 'metrics-unblock'");
+        execute("UPDATE queue_source_state SET status = 'blocked' WHERE source_id = 'metrics-unblock'");
+        post("/admin/queues/" + QUEUE + "/sources/metrics-unblock/unblock", Map.of("reason", "metric"), Map.class, adminHeaders());
+
+        assertTrue(metricValue("queue.failures.total") >= failuresBefore + 1.0);
+        assertTrue(metricValue("queue.heartbeats.total") >= heartbeatBefore + 1.0);
+        assertTrue(metricValue("queue.heartbeats.failed") >= heartbeatFailedBefore + 1.0);
+        assertTrue(metricValue("queue.lease_expiries.total") >= leaseExpiriesBefore + 1.0);
+        assertTrue(metricValue("queue.admin.retry.total") >= adminRetryBefore + 1.0);
+        assertTrue(metricValue("queue.admin.skip.total") >= adminSkipBefore + 1.0);
+        assertTrue(metricValue("queue.admin.cancel.total") >= adminCancelBefore + 1.0);
+        assertTrue(metricValue("queue.admin.unblock.total") >= adminUnblockBefore + 1.0);
     }
 
     private ResponseEntity<Map> enqueue(String sourceId, int maxAttempts) {
@@ -249,6 +330,13 @@ class QueueApiIntegrationTest {
         List<Map<String, Object>> measurements = (List<Map<String, Object>>) response.getBody().get("measurements");
         assertFalse(measurements.isEmpty());
         return ((Number) measurements.getFirst().get("value")).doubleValue();
+    }
+
+    private UUID makeDeadLetteredHead(String sourceId) throws Exception {
+        UUID itemId = UUID.fromString((String) enqueue(sourceId, 5).getBody().get("itemId"));
+        execute("UPDATE queue_item SET status = 'dead_lettered' WHERE item_id = '" + itemId + "'");
+        execute("UPDATE queue_source_state SET status = 'blocked' WHERE source_id = '" + sourceId + "'");
+        return itemId;
     }
 
     private String url(String path) {

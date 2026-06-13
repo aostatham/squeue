@@ -34,19 +34,19 @@ docker compose up -d postgres
 Run the server:
 
 ```sh
-mvn -pl sequenced-queue-server spring-boot:run
+./mvnw -pl sequenced-queue-server spring-boot:run
 ```
 
 Run Java tests:
 
 ```sh
-mvn test
+./mvnw test
 ```
 
 Run the required PostgreSQL contract suite with Docker-backed Testcontainers:
 
 ```sh
-mvn verify -Ppostgres-contract
+./mvnw verify -Ppostgres-contract
 ```
 
 Run Python client tests:

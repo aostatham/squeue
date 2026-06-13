@@ -235,7 +235,7 @@ paths:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/items/{itemId}/retry:
     post:
-      summary: Retry a failed or dead-lettered item
+      summary: Retry a dead-lettered head item
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - $ref: "#/components/parameters/ItemId"
