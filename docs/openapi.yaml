@@ -14,6 +14,17 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/EnqueueRequest"
+            examples:
+              command:
+                value:
+                  sourceId: "customer-123"
+                  itemType: "example.command"
+                  idempotencyKey: "sync-customer-123-001"
+                  payload:
+                    action: "sync"
+                  headers:
+                    traceId: "trace-001"
+                  maxAttempts: 5
       responses:
         "200":
           description: Enqueued or existing idempotent item
@@ -21,6 +32,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EnqueueResponse"
+              examples:
+                enqueued:
+                  value:
+                    itemId: "00000000-0000-0000-0000-000000000001"
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    sequenceNo: 1
+                    status: "pending"
         default:
           $ref: "#/components/responses/Error"
   /queues/{queueName}/claims:
@@ -34,6 +53,13 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/ClaimRequest"
+            examples:
+              worker:
+                value:
+                  workerId: "worker-1"
+                  supportedItemTypes: ["example.command"]
+                  leaseSeconds: 60
+                  maxItems: 1
       responses:
         "200":
           description: Claim result, empty when no item is available
@@ -41,6 +67,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ClaimResponse"
+              examples:
+                claimed:
+                  value:
+                    leaseId: "11111111-1111-1111-1111-111111111111"
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    leaseUntil: "2026-06-13T10:01:00Z"
+                    items:
+                      - itemId: "00000000-0000-0000-0000-000000000001"
+                        sequenceNo: 1
+                        itemType: "example.command"
+                        payload:
+                          action: "sync"
+                        headers:
+                          traceId: "trace-001"
+                empty:
+                  value:
+                    leaseId: null
+                    queueName: null
+                    sourceId: null
+                    leaseUntil: null
+                    items: []
         default:
           $ref: "#/components/responses/Error"
   /queues/{queueName}/items/{itemId}/complete:
@@ -55,6 +103,13 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CompleteRequest"
+            examples:
+              success:
+                value:
+                  workerId: "worker-1"
+                  leaseId: "11111111-1111-1111-1111-111111111111"
+                  result:
+                    handledBy: "worker-1"
       responses:
         "200":
           description: Completed item
@@ -62,6 +117,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+              examples:
+                completed:
+                  value:
+                    itemId: "00000000-0000-0000-0000-000000000001"
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    sequenceNo: 1
+                    itemType: "example.command"
+                    status: "succeeded"
+                    result:
+                      handledBy: "worker-1"
         default:
           $ref: "#/components/responses/Error"
   /queues/{queueName}/items/{itemId}/fail:
@@ -76,6 +142,22 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/FailRequest"
+            examples:
+              retryable:
+                value:
+                  workerId: "worker-1"
+                  leaseId: "11111111-1111-1111-1111-111111111111"
+                  retryable: true
+                  errorType: "TEMPORARY_ERROR"
+                  errorMessage: "remote service unavailable"
+                  backoffSeconds: 30
+              nonRetryable:
+                value:
+                  workerId: "worker-1"
+                  leaseId: "11111111-1111-1111-1111-111111111111"
+                  retryable: false
+                  errorType: "VALIDATION_ERROR"
+                  errorMessage: "payload is invalid"
       responses:
         "200":
           description: Failed, retry scheduled, or dead-lettered item
@@ -83,6 +165,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+              examples:
+                retryWait:
+                  value:
+                    itemId: "00000000-0000-0000-0000-000000000001"
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    sequenceNo: 1
+                    itemType: "example.command"
+                    status: "retry_wait"
+                    lastErrorType: "TEMPORARY_ERROR"
+                    lastErrorMessage: "remote service unavailable"
         default:
           $ref: "#/components/responses/Error"
   /queues/{queueName}/leases/{leaseId}/heartbeat:
@@ -102,6 +195,11 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/HeartbeatRequest"
+            examples:
+              extend:
+                value:
+                  workerId: "worker-1"
+                  extendBySeconds: 60
       responses:
         "204":
           description: Lease extended
@@ -126,6 +224,21 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ItemResponse"
+              examples:
+                sourceItems:
+                  value:
+                    - itemId: "00000000-0000-0000-0000-000000000001"
+                      queueName: "wf.commands"
+                      sourceId: "customer-123"
+                      sequenceNo: 1
+                      itemType: "example.command"
+                      status: "succeeded"
+                    - itemId: "00000000-0000-0000-0000-000000000002"
+                      queueName: "wf.commands"
+                      sourceId: "customer-123"
+                      sequenceNo: 2
+                      itemType: "example.command"
+                      status: "pending"
         default:
           $ref: "#/components/responses/Error"
   /queues/{queueName}/items/{itemId}:
@@ -141,6 +254,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+              examples:
+                item:
+                  value:
+                    itemId: "00000000-0000-0000-0000-000000000001"
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    sequenceNo: 1
+                    itemType: "example.command"
+                    status: "pending"
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/dead-lettered:
@@ -159,6 +281,19 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ItemResponse"
+              examples:
+                deadLettered:
+                  value:
+                    - itemId: "00000000-0000-0000-0000-000000000003"
+                      queueName: "wf.commands"
+                      sourceId: "customer-123"
+                      sequenceNo: 3
+                      itemType: "example.command"
+                      status: "dead_lettered"
+                      attemptCount: 5
+                      maxAttempts: 5
+                      lastErrorType: "TEMPORARY_ERROR"
+                      lastErrorMessage: "remote service unavailable"
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/blocked-sources:
@@ -177,6 +312,17 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/BlockedSourceResponse"
+              examples:
+                blockedSources:
+                  value:
+                    - queueName: "wf.commands"
+                      sourceId: "customer-123"
+                      status: "blocked"
+                      leasedBy: null
+                      leaseUntil: null
+                      headItemId: "00000000-0000-0000-0000-000000000003"
+                      headItemStatus: "dead_lettered"
+                      updatedAt: "2026-06-13T10:00:00Z"
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/sources/{sourceId}/items:
@@ -198,6 +344,21 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ItemResponse"
+              examples:
+                adminSourceItems:
+                  value:
+                    - itemId: "00000000-0000-0000-0000-000000000001"
+                      queueName: "wf.commands"
+                      sourceId: "customer-123"
+                      sequenceNo: 1
+                      itemType: "example.command"
+                      status: "succeeded"
+                    - itemId: "00000000-0000-0000-0000-000000000003"
+                      queueName: "wf.commands"
+                      sourceId: "customer-123"
+                      sequenceNo: 3
+                      itemType: "example.command"
+                      status: "dead_lettered"
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/items/{itemId}:
@@ -213,6 +374,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+              examples:
+                adminItem:
+                  value:
+                    itemId: "00000000-0000-0000-0000-000000000003"
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    sequenceNo: 3
+                    itemType: "example.command"
+                    status: "dead_lettered"
+                    attemptCount: 5
+                    maxAttempts: 5
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/audit:
@@ -231,6 +403,20 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/AdminAuditResponse"
+              examples:
+                auditRows:
+                  value:
+                    - auditId: "22222222-2222-2222-2222-222222222222"
+                      occurredAt: "2026-06-13T10:05:00Z"
+                      actorId: "admin-api-key"
+                      operation: "skip"
+                      queueName: "wf.commands"
+                      sourceId: "customer-123"
+                      itemId: "00000000-0000-0000-0000-000000000003"
+                      previousStatus: "dead_lettered"
+                      newStatus: "skipped"
+                      reason: "operator repair"
+                      metadata: {}
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/items/{itemId}/retry:
@@ -245,6 +431,10 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/AdminActionRequest"
+            examples:
+              retryReason:
+                value:
+                  reason: "temporary dependency recovered"
       responses:
         "200":
           description: Retried item
@@ -252,6 +442,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+              examples:
+                retried:
+                  value:
+                    itemId: "00000000-0000-0000-0000-000000000003"
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    sequenceNo: 3
+                    itemType: "example.command"
+                    status: "retry_wait"
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/items/{itemId}/skip:
@@ -266,6 +465,10 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/AdminActionRequest"
+            examples:
+              skipReason:
+                value:
+                  reason: "bad command superseded"
       responses:
         "200":
           description: Skipped item
@@ -273,6 +476,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+              examples:
+                skipped:
+                  value:
+                    itemId: "00000000-0000-0000-0000-000000000003"
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    sequenceNo: 3
+                    itemType: "example.command"
+                    status: "skipped"
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/items/{itemId}/cancel:
@@ -287,6 +499,10 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/AdminActionRequest"
+            examples:
+              cancelReason:
+                value:
+                  reason: "source was deleted"
       responses:
         "200":
           description: Cancelled item
@@ -294,6 +510,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+              examples:
+                cancelled:
+                  value:
+                    itemId: "00000000-0000-0000-0000-000000000004"
+                    queueName: "wf.commands"
+                    sourceId: "customer-456"
+                    sequenceNo: 1
+                    itemType: "example.command"
+                    status: "cancelled"
         default:
           $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/sources/{sourceId}/unblock:
@@ -312,6 +537,10 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/AdminActionRequest"
+            examples:
+              unblockReason:
+                value:
+                  reason: "blocking head was repaired"
       responses:
         "200":
           description: Unblocked source
@@ -319,6 +548,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SourceResponse"
+              examples:
+                unblocked:
+                  value:
+                    queueName: "wf.commands"
+                    sourceId: "customer-123"
+                    nextSequenceNo: 4
+                    status: "idle"
+                    leasedBy: null
+                    leaseId: null
+                    leaseUntil: null
+                    updatedAt: "2026-06-13T10:06:00Z"
         default:
           $ref: "#/components/responses/Error"
 components:
@@ -329,6 +569,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            leaseLost:
+              value:
+                errorCode: "LEASE_LOST"
+                message: "lease is not held by worker"
+                queueName: "wf.commands"
+                sourceId: "customer-123"
+                itemId: "00000000-0000-0000-0000-000000000001"
+                details: {}
   parameters:
     QueueName:
       name: queueName

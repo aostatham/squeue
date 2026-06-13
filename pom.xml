@@ -13,6 +13,9 @@
     <module>sequenced-queue-server</module>
     <module>sequenced-queue-java-client</module>
     <module>clients/java-direct</module>
+    <module>examples/java-producer</module>
+    <module>examples/java-rest-worker</module>
+    <module>examples/java-direct-worker</module>
   </modules>
 
   <properties>

@@ -22,6 +22,7 @@ It does not guarantee exactly-once side effects. Handlers must be idempotent.
 - `clients/java-direct`: trusted/internal Java PostgreSQL adapter that uses the same `sequenced-queue-core` implementation through a caller-provided `DataSource`.
 - `sequenced-queue-python-client`: Python HTTP client and polling worker helper.
 - `docs/openapi.yaml`: MVP HTTP API description.
+- `examples`: runnable Java and Python producer/worker examples.
 
 ## Local Run
 
@@ -55,6 +56,8 @@ Run Python client tests:
 cd sequenced-queue-python-client
 python -m pytest
 ```
+
+For a runnable producer/worker walkthrough, see [Developer Quickstart](docs/developer_quickstart.md).
 
 ## Delivery Semantics
 
