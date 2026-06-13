@@ -57,7 +57,7 @@ class PostgresQueueContractTest {
 
     @BeforeEach
     void clearTables() throws Exception {
-        execute("TRUNCATE queue_item, queue_source_state");
+        execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
     }
 
     @Test
@@ -343,6 +343,53 @@ class PostgresQueueContractTest {
     }
 
     @Test
+    void adminRetryWritesAudit() throws Exception {
+        enqueue("source-1", 1);
+        ClaimResponse first = claim("worker-1");
+        fail(first, true, null);
+
+        queue.retry(QUEUE, first.items().getFirst().itemId(), "admin-api-key", "try again");
+
+        assertEquals(1, count("queue_admin_audit"));
+        assertEquals("retry", scalar("SELECT operation FROM queue_admin_audit"));
+        assertEquals("dead_lettered", scalar("SELECT previous_status FROM queue_admin_audit"));
+        assertEquals("retry_wait", scalar("SELECT new_status FROM queue_admin_audit"));
+        assertEquals("admin-api-key", scalar("SELECT actor_id FROM queue_admin_audit"));
+        assertEquals("try again", scalar("SELECT reason FROM queue_admin_audit"));
+    }
+
+    @Test
+    void adminSkipCancelAndUnblockWriteAudit() throws Exception {
+        UUID skipped = enqueue("skip-source", 1).itemId();
+        ClaimResponse skipClaim = claim("worker-1");
+        fail(skipClaim, true, null);
+        queue.skip(QUEUE, skipped, "admin-api-key", "skip bad work");
+
+        UUID cancelled = enqueue("cancel-source").itemId();
+        queue.cancel(QUEUE, cancelled, "admin-api-key", "cancel queued work");
+
+        enqueue("unblock-source");
+        execute("UPDATE queue_item SET status = 'skipped' WHERE source_id = 'unblock-source'");
+        execute("UPDATE queue_source_state SET status = 'blocked' WHERE source_id = 'unblock-source'");
+        queue.unblockSource(QUEUE, "unblock-source", "admin-api-key", "source repaired");
+
+        assertEquals(3, count("queue_admin_audit"));
+        assertEquals(1, countWhere("queue_admin_audit", "operation = 'skip' AND previous_status = 'dead_lettered' AND new_status = 'skipped' AND item_id = '" + skipped + "'"));
+        assertEquals(1, countWhere("queue_admin_audit", "operation = 'cancel' AND previous_status = 'pending' AND new_status = 'cancelled' AND item_id = '" + cancelled + "'"));
+        assertEquals(1, countWhere("queue_admin_audit", "operation = 'unblock' AND previous_status = 'blocked' AND new_status = 'idle' AND source_id = 'unblock-source'"));
+    }
+
+    @Test
+    void failedAdminOperationDoesNotWriteSuccessAudit() throws Exception {
+        enqueue("source-1");
+        ClaimResponse claim = claim("worker-1");
+
+        assertThrows(QueueException.class, () -> queue.skip(QUEUE, claim.items().getFirst().itemId(), "admin-api-key", "invalid"));
+
+        assertEquals(0, count("queue_admin_audit"));
+    }
+
+    @Test
     void adminSkipProcessingItemIsRejected() throws Exception {
         enqueue("source-1");
         ClaimResponse claim = claim("worker-1");
@@ -351,6 +398,19 @@ class PostgresQueueContractTest {
 
         assertEquals(QueueException.CONFLICT, error.statusCode());
         assertEquals("leased", scalar("SELECT status FROM queue_source_state WHERE source_id = 'source-1'"));
+        assertEquals("processing", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
+    }
+
+    @Test
+    void unblockSourceRejectsBlockedSourceWithProcessingHead() throws Exception {
+        enqueue("source-1");
+        claim("worker-1");
+        execute("UPDATE queue_source_state SET status = 'blocked', leased_by = NULL, lease_id = NULL, lease_until = NULL WHERE source_id = 'source-1'");
+
+        QueueException error = assertThrows(QueueException.class, () -> queue.unblockSource(QUEUE, "source-1"));
+
+        assertEquals(QueueException.CONFLICT, error.statusCode());
+        assertEquals("blocked", scalar("SELECT status FROM queue_source_state WHERE source_id = 'source-1'"));
         assertEquals("processing", scalar("SELECT status FROM queue_item WHERE sequence_no = 1"));
     }
 
@@ -370,7 +430,7 @@ class PostgresQueueContractTest {
 
     @Test
     void schemaInfoReportsFlywayVersion() {
-        assertEquals("1", queue.getSchemaInfo().schemaVersion());
+        assertEquals("2", queue.getSchemaInfo().schemaVersion());
     }
 
     private EnqueueResponse enqueue(String sourceId) {

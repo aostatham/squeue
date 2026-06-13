@@ -72,7 +72,7 @@ class RestDirectCompatibilityTest {
 
     @BeforeEach
     void clearTables() throws Exception {
-        execute("TRUNCATE queue_item, queue_source_state");
+        execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
     }
 
     @Test

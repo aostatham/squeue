@@ -195,6 +195,16 @@ public class PostgresQueueRepository implements QueueRepository {
     }
 
     @Override
+    public List<QueueItemRow> listDeadLettered(String queueName, int limit, int offset) {
+        return query("""
+            SELECT * FROM queue_item
+            WHERE queue_name = ? AND status = 'dead_lettered'
+            ORDER BY updated_at DESC, sequence_no
+            LIMIT ? OFFSET ?
+            """, this::mapItem, queueName, limit, offset);
+    }
+
+    @Override
     public QueueItemRow complete(UUID itemId, String resultJson, OffsetDateTime now) {
         return queryOne("""
             UPDATE queue_item
@@ -286,6 +296,33 @@ public class PostgresQueueRepository implements QueueRepository {
             WHERE queue_name = ? AND status = 'blocked'
             ORDER BY updated_at, source_id
             """, this::mapSource, queueName);
+    }
+
+    @Override
+    public List<BlockedSourceRow> inspectBlockedSources(String queueName, int limit, int offset) {
+        return query("""
+            SELECT s.queue_name,
+                   s.source_id,
+                   s.status,
+                   s.leased_by,
+                   s.lease_until,
+                   s.updated_at,
+                   head.item_id AS head_item_id,
+                   head.status AS head_item_status
+            FROM queue_source_state s
+            LEFT JOIN LATERAL (
+                SELECT i.item_id, i.status
+                FROM queue_item i
+                WHERE i.queue_name = s.queue_name
+                  AND i.source_id = s.source_id
+                  AND i.status NOT IN ('succeeded', 'cancelled', 'skipped', 'failed')
+                ORDER BY i.sequence_no
+                LIMIT 1
+            ) head ON true
+            WHERE s.queue_name = ? AND s.status = 'blocked'
+            ORDER BY s.updated_at, s.source_id
+            LIMIT ? OFFSET ?
+            """, this::mapBlockedSource, queueName, limit, offset);
     }
 
     @Override
@@ -389,6 +426,51 @@ public class PostgresQueueRepository implements QueueRepository {
     }
 
     @Override
+    public void insertAdminAudit(UUID auditId, OffsetDateTime occurredAt, String actorId, String operation, String queueName, String sourceId, UUID itemId, String previousStatus, String newStatus, String reason, String metadataJson) {
+        update("""
+            INSERT INTO queue_admin_audit (
+                audit_id, occurred_at, actor_id, operation, queue_name, source_id,
+                item_id, previous_status, new_status, reason, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))
+            """, auditId, occurredAt, actorId, operation, queueName, sourceId, itemId, previousStatus, newStatus, reason, metadataJson);
+    }
+
+    @Override
+    public List<AdminAuditRow> listAdminAudit(String queueName, int limit, int offset) {
+        return query("""
+            SELECT *
+            FROM queue_admin_audit
+            WHERE queue_name = ?
+            ORDER BY occurred_at DESC
+            LIMIT ? OFFSET ?
+            """, this::mapAdminAudit, queueName, limit, offset);
+    }
+
+    @Override
+    public QueueDtos.QueueMetricsSnapshot metricsSnapshot() {
+        return query("""
+            SELECT
+                COUNT(*) FILTER (WHERE i.status = 'pending') AS pending_items,
+                COUNT(*) FILTER (WHERE i.status = 'processing') AS processing_items,
+                COUNT(*) FILTER (WHERE i.status = 'retry_wait') AS retry_wait_items,
+                COUNT(*) FILTER (WHERE i.status = 'dead_lettered') AS dead_lettered_items,
+                (SELECT COUNT(*) FROM queue_source_state s WHERE s.status = 'idle') AS idle_sources,
+                (SELECT COUNT(*) FROM queue_source_state s WHERE s.status = 'leased') AS leased_sources,
+                (SELECT COUNT(*) FROM queue_source_state s WHERE s.status = 'blocked') AS blocked_sources
+            FROM queue_item i
+            """, rs -> new QueueDtos.QueueMetricsSnapshot(
+                rs.getLong("pending_items"),
+                rs.getLong("processing_items"),
+                rs.getLong("retry_wait_items"),
+                rs.getLong("dead_lettered_items"),
+                rs.getLong("idle_sources"),
+                rs.getLong("leased_sources"),
+                rs.getLong("blocked_sources")
+            )).getFirst();
+    }
+
+    @Override
     public QueueSchemaInfo getSchemaInfo() {
         return query("""
             SELECT version
@@ -449,6 +531,36 @@ public class PostgresQueueRepository implements QueueRepository {
 
     private SourceStateRow mapSource(ResultSet rs) throws SQLException {
         return new SourceStateRow(rs.getString("queue_name"), rs.getString("source_id"), rs.getLong("next_sequence_no"), SourceStatus.valueOf(rs.getString("status")), rs.getString("leased_by"), rs.getObject("lease_id", UUID.class), toOffset(rs.getTimestamp("lease_until")), toOffset(rs.getTimestamp("created_at")), toOffset(rs.getTimestamp("updated_at")));
+    }
+
+    private BlockedSourceRow mapBlockedSource(ResultSet rs) throws SQLException {
+        String headItemStatus = rs.getString("head_item_status");
+        return new BlockedSourceRow(
+            rs.getString("queue_name"),
+            rs.getString("source_id"),
+            SourceStatus.valueOf(rs.getString("status")),
+            rs.getString("leased_by"),
+            toOffset(rs.getTimestamp("lease_until")),
+            rs.getObject("head_item_id", UUID.class),
+            headItemStatus == null ? null : ItemStatus.valueOf(headItemStatus),
+            toOffset(rs.getTimestamp("updated_at"))
+        );
+    }
+
+    private AdminAuditRow mapAdminAudit(ResultSet rs) throws SQLException {
+        return new AdminAuditRow(
+            rs.getObject("audit_id", UUID.class),
+            toOffset(rs.getTimestamp("occurred_at")),
+            rs.getString("actor_id"),
+            rs.getString("operation"),
+            rs.getString("queue_name"),
+            rs.getString("source_id"),
+            rs.getObject("item_id", UUID.class),
+            rs.getString("previous_status"),
+            rs.getString("new_status"),
+            rs.getString("reason"),
+            rs.getString("metadata_json")
+        );
     }
 
     private OffsetDateTime toOffset(Timestamp timestamp) {

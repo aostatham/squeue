@@ -54,7 +54,7 @@ class QueueApiIntegrationTest {
 
     @BeforeEach
     void clearTables() throws Exception {
-        execute("TRUNCATE queue_item, queue_source_state");
+        execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
     }
 
     @Test
@@ -131,6 +131,91 @@ class QueueApiIntegrationTest {
         assertFalse(((List<?>) nextClaim.get("items")).isEmpty());
     }
 
+    @Test
+    void adminInspectionEndpointsExposeDeadLetterBlockedSourceItemsItemDetailAndAudit() {
+        UUID firstId = UUID.fromString((String) enqueue("source-1", 1).getBody().get("itemId"));
+        UUID secondId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
+        Map<String, Object> claim = claim("worker-1").getBody();
+        post("/queues/" + QUEUE + "/items/" + firstId + "/fail", Map.of("workerId", "worker-1", "leaseId", claim.get("leaseId"), "retryable", true, "errorType", "ERR", "errorMessage", "failed"), Map.class);
+
+        ResponseEntity<Map[]> deadLettered = get("/admin/queues/" + QUEUE + "/dead-lettered", Map[].class, adminHeaders());
+        ResponseEntity<Map[]> blocked = get("/admin/queues/" + QUEUE + "/blocked-sources", Map[].class, adminHeaders());
+        ResponseEntity<Map[]> sourceItems = get("/admin/queues/" + QUEUE + "/sources/source-1/items", Map[].class, adminHeaders());
+        ResponseEntity<Map> item = get("/admin/queues/" + QUEUE + "/items/" + firstId, Map.class, adminHeaders());
+
+        assertEquals(HttpStatus.OK, deadLettered.getStatusCode());
+        assertEquals(firstId.toString(), deadLettered.getBody()[0].get("itemId"));
+        assertEquals("dead_lettered", deadLettered.getBody()[0].get("status"));
+        assertEquals(HttpStatus.OK, blocked.getStatusCode());
+        assertEquals("source-1", blocked.getBody()[0].get("sourceId"));
+        assertEquals(firstId.toString(), blocked.getBody()[0].get("headItemId"));
+        assertEquals("dead_lettered", blocked.getBody()[0].get("headItemStatus"));
+        assertEquals(HttpStatus.OK, sourceItems.getStatusCode());
+        assertEquals(firstId.toString(), sourceItems.getBody()[0].get("itemId"));
+        assertEquals(secondId.toString(), sourceItems.getBody()[1].get("itemId"));
+        assertEquals(HttpStatus.OK, item.getStatusCode());
+        assertEquals(firstId.toString(), item.getBody().get("itemId"));
+
+        post("/admin/queues/" + QUEUE + "/items/" + firstId + "/skip", Map.of("reason", "operator repair"), Map.class, adminHeaders());
+        ResponseEntity<Map[]> audit = get("/admin/queues/" + QUEUE + "/audit", Map[].class, adminHeaders());
+
+        assertEquals(HttpStatus.OK, audit.getStatusCode());
+        assertEquals("skip", audit.getBody()[0].get("operation"));
+        assertEquals(firstId.toString(), audit.getBody()[0].get("itemId"));
+        assertEquals("source-1", audit.getBody()[0].get("sourceId"));
+        assertEquals("dead_lettered", audit.getBody()[0].get("previousStatus"));
+        assertEquals("skipped", audit.getBody()[0].get("newStatus"));
+    }
+
+    @Test
+    void actuatorHealthIncludesQueueDetails() {
+        ResponseEntity<Map> health = get("/actuator/health", Map.class, new HttpHeaders());
+
+        assertEquals(HttpStatus.OK, health.getStatusCode());
+        Map<String, Object> components = (Map<String, Object>) health.getBody().get("components");
+        assertNotNull(components.get("queue"));
+        Map<String, Object> queue = (Map<String, Object>) components.get("queue");
+        assertEquals("UP", queue.get("status"));
+        Map<String, Object> details = (Map<String, Object>) queue.get("details");
+        assertEquals(true, details.get("queueItemTablePresent"));
+        assertEquals(true, details.get("queueSourceStateTablePresent"));
+        assertEquals(true, details.get("adminAuditTablePresent"));
+        assertEquals("2", details.get("schemaVersion"));
+        assertEquals(true, details.get("recoveryEnabled"));
+    }
+
+    @Test
+    void metricsEndpointExposesCountersAndGauges() {
+        UUID itemId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
+        assertEquals(1.0, metricValue("queue.items.pending"));
+
+        Map<String, Object> claim = claim("worker-1").getBody();
+        assertTrue(metricValue("queue.claims.total") >= 1.0);
+        assertEquals(1.0, metricValue("queue.items.processing"));
+
+        post("/queues/" + QUEUE + "/items/" + itemId + "/complete", Map.of("workerId", "worker-1", "leaseId", claim.get("leaseId"), "result", Map.of()), Map.class);
+
+        assertTrue(metricValue("queue.completions.total") >= 1.0);
+        assertEquals(1.0, metricValue("queue.sources.idle"));
+    }
+
+    @Test
+    void structuredErrorResponsesAreStable() {
+        UUID itemId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
+        claim("worker-1");
+
+        ResponseEntity<Map> wrongLease = post("/queues/" + QUEUE + "/items/" + itemId + "/complete", Map.of("workerId", "worker-1", "leaseId", UUID.randomUUID(), "result", Map.of()), Map.class);
+        ResponseEntity<Map> missingItem = get("/queues/" + QUEUE + "/items/" + UUID.randomUUID(), Map.class, workerHeaders());
+        ResponseEntity<Map> invalidRequest = post("/queues/" + QUEUE + "/claims", Map.of("workerId", "worker-1", "supportedItemTypes", List.of("type"), "leaseSeconds", 0, "maxItems", 1), Map.class);
+
+        assertEquals(HttpStatus.CONFLICT, wrongLease.getStatusCode());
+        assertEquals("LEASE_LOST", wrongLease.getBody().get("errorCode"));
+        assertEquals(HttpStatus.NOT_FOUND, missingItem.getStatusCode());
+        assertEquals("ITEM_NOT_FOUND", missingItem.getBody().get("errorCode"));
+        assertEquals(HttpStatus.BAD_REQUEST, invalidRequest.getStatusCode());
+        assertEquals("VALIDATION_ERROR", invalidRequest.getBody().get("errorCode"));
+    }
+
     private ResponseEntity<Map> enqueue(String sourceId, int maxAttempts) {
         return post("/queues/" + QUEUE + "/items", Map.of("sourceId", sourceId, "itemType", "type", "payload", Map.of("source", sourceId), "headers", Map.of(), "maxAttempts", maxAttempts), Map.class);
     }
@@ -152,6 +237,18 @@ class QueueApiIntegrationTest {
 
     private <T> ResponseEntity<T> post(String path, Object body, Class<T> responseType, HttpHeaders headers) {
         return rest.exchange(url(path), HttpMethod.POST, new HttpEntity<>(body, headers), responseType);
+    }
+
+    private <T> ResponseEntity<T> get(String path, Class<T> responseType, HttpHeaders headers) {
+        return rest.exchange(url(path), HttpMethod.GET, new HttpEntity<>(headers), responseType);
+    }
+
+    private double metricValue(String name) {
+        ResponseEntity<Map> response = get("/actuator/metrics/" + name, Map.class, new HttpHeaders());
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        List<Map<String, Object>> measurements = (List<Map<String, Object>>) response.getBody().get("measurements");
+        assertFalse(measurements.isEmpty());
+        return ((Number) measurements.getFirst().get("value")).doubleValue();
     }
 
     private String url(String path) {

@@ -1,7 +1,9 @@
 package com.example.sequencedqueue.server.api;
 
 import java.io.IOException;
+import java.util.Map;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,12 +14,16 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component
 public class ApiKeyFilter extends OncePerRequestFilter {
+    public static final String ACTOR_ID_ATTRIBUTE = "sequencedQueue.actorId";
+
     private final String apiKey;
     private final String adminApiKey;
+    private final ObjectMapper objectMapper;
 
     public ApiKeyFilter(
         @Value("${sequenced-queue.api-key}") String apiKey,
-        @Value("${sequenced-queue.admin-api-key}") String adminApiKey
+        @Value("${sequenced-queue.admin-api-key}") String adminApiKey,
+        ObjectMapper objectMapper
     ) {
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalArgumentException("sequenced-queue.api-key must not be blank");
@@ -30,6 +36,7 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         }
         this.apiKey = apiKey;
         this.adminApiKey = adminApiKey;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -43,18 +50,21 @@ public class ApiKeyFilter extends OncePerRequestFilter {
 
         String bearerToken = bearerToken(request);
         if (bearerToken == null || bearerToken.isBlank()) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "missing bearer token");
+            writeError(response, HttpServletResponse.SC_UNAUTHORIZED, "UNAUTHORIZED", "missing bearer token");
             return;
         }
 
         if (path.startsWith("/admin/")) {
             if (!adminApiKey.equals(bearerToken)) {
-                response.sendError(HttpServletResponse.SC_FORBIDDEN, "admin api key required");
+                writeError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "admin api key required");
                 return;
             }
+            request.setAttribute(ACTOR_ID_ATTRIBUTE, "admin-api-key");
         } else if (!apiKey.equals(bearerToken) && !adminApiKey.equals(bearerToken)) {
-            response.sendError(HttpServletResponse.SC_FORBIDDEN, "invalid api key");
+            writeError(response, HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "invalid api key");
             return;
+        } else {
+            request.setAttribute(ACTOR_ID_ATTRIBUTE, adminApiKey.equals(bearerToken) ? "admin-api-key" : "api-key");
         }
 
         filterChain.doFilter(request, response);
@@ -75,5 +85,15 @@ public class ApiKeyFilter extends OncePerRequestFilter {
             return null;
         }
         return authorization.substring("Bearer ".length());
+    }
+
+    private void writeError(HttpServletResponse response, int status, String errorCode, String message) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json");
+        objectMapper.writeValue(response.getWriter(), Map.of(
+            "errorCode", errorCode,
+            "message", message,
+            "details", Map.of()
+        ));
     }
 }

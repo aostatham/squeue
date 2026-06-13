@@ -78,6 +78,9 @@ public class SequencedQueueWorker implements AutoCloseable {
             ClaimItem item = claim.items().getFirst();
             Function<ClaimItem, QueueResult> handler = handlers.get(item.itemType());
             if (handler == null) {
+                if (leaseLost.get()) {
+                    return;
+                }
                 client.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), false, "NO_HANDLER", "No handler for " + item.itemType(), null));
                 return;
             }

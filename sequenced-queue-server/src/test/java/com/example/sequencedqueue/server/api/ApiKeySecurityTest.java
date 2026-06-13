@@ -8,6 +8,7 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,7 +49,7 @@ class ApiKeySecurityTest {
 
     @BeforeEach
     void clearTables() throws Exception {
-        execute("TRUNCATE queue_item, queue_source_state");
+        execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
     }
 
     @Test
@@ -56,6 +57,7 @@ class ApiKeySecurityTest {
         ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items", Map.of(), Map.class, new HttpHeaders());
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals("UNAUTHORIZED", response.getBody().get("errorCode"));
     }
 
     @Test
@@ -73,6 +75,7 @@ class ApiKeySecurityTest {
         ResponseEntity<Map> response = get("/admin/queues/" + QUEUE + "/blocked-sources", Map.class, bearer("dev-key"));
 
         assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        assertEquals("FORBIDDEN", response.getBody().get("errorCode"));
     }
 
     @Test
@@ -84,7 +87,7 @@ class ApiKeySecurityTest {
 
     @Test
     void equalApiKeysAreRejected() {
-        assertThrows(IllegalArgumentException.class, () -> new ApiKeyFilter("same-key", "same-key"));
+        assertThrows(IllegalArgumentException.class, () -> new ApiKeyFilter("same-key", "same-key", new ObjectMapper()));
     }
 
     private <T> ResponseEntity<T> post(String path, Object body, Class<T> responseType, HttpHeaders headers) {

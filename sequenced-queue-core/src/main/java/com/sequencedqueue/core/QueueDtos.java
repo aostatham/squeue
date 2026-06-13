@@ -41,4 +41,13 @@ public final class QueueDtos {
 
     public record SourceResponse(String queueName, String sourceId, long nextSequenceNo, String status, String leasedBy, UUID leaseId, OffsetDateTime leaseUntil, OffsetDateTime updatedAt) {
     }
+
+    public record BlockedSourceResponse(String queueName, String sourceId, String status, String leasedBy, OffsetDateTime leaseUntil, UUID headItemId, String headItemStatus, OffsetDateTime updatedAt) {
+    }
+
+    public record AdminAuditResponse(UUID auditId, OffsetDateTime occurredAt, String actorId, String operation, String queueName, String sourceId, UUID itemId, String previousStatus, String newStatus, String reason, Map<String, Object> metadata) {
+    }
+
+    public record QueueMetricsSnapshot(long pendingItems, long processingItems, long retryWaitItems, long deadLetteredItems, long idleSources, long leasedSources, long blockedSources) {
+    }
 }

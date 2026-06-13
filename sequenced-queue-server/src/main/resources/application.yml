@@ -14,3 +14,12 @@ sequenced-queue:
   default-max-attempts: 5
   api-key: ${SEQUENCED_QUEUE_API_KEY:dev-key}
   admin-api-key: ${SEQUENCED_QUEUE_ADMIN_API_KEY:dev-admin-key}
+  recovery-enabled: ${SEQUENCED_QUEUE_RECOVERY_ENABLED:true}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+  endpoint:
+    health:
+      show-details: always

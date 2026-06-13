@@ -50,6 +50,22 @@ class SequencedQueueClientTest {
     }
 
     @Test
+    void preservesBaseUrlContextPath() {
+        AtomicReference<String> requestedPath = new AtomicReference<>();
+        server.createContext("/", exchange -> {
+            requestedPath.set(exchange.getRequestURI().getRawPath());
+            respond(exchange, 200, "[]");
+        });
+
+        SequencedQueueClient.builder()
+            .baseUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/app")
+            .build()
+            .sourceItems("queue name/alpha", "source id/1");
+
+        assertEquals("/app/queues/queue%20name%2Falpha/sources/source%20id%2F1/items", requestedPath.get());
+    }
+
+    @Test
     void workerDoesNotCompleteOrFailAfterHeartbeatLosesLease() throws Exception {
         UUID leaseId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();

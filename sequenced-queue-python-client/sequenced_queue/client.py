@@ -201,6 +201,8 @@ class SequencedQueueWorker:
         try:
             handler = self.handlers.get(item.item_type)
             if handler is None:
+                if lease_lost.is_set():
+                    return
                 self.client.fail(self.queue_name, item.item_id, self.worker_id, lease_id, False, "NO_HANDLER", f"No handler for {item.item_type}")
                 return
             result = handler(item)

@@ -31,7 +31,9 @@ This file records architectural and implementation decisions for the `sequenced-
 | SQ-017 | Keep direct PostgreSQL client internal/trusted only                               | Accepted |
 | SQ-018 | Expose admin repair operations for blocked sources and failed items               | Accepted |
 | SQ-019 | Use short database transactions; never hold transactions during handler execution | Accepted |
-| SQ-020 | Use schema version compatibility checks for direct clients                        | Proposed |
+| SQ-020 | Use schema version compatibility checks for direct clients                        | Accepted |
+| SQ-021 | Keep production SQL in `sequenced-queue-core`                                    | Accepted |
+| SQ-022 | Add operational readiness surface before product features                         | Accepted |
 
 ---
 
@@ -1064,3 +1066,52 @@ For each (queueName, sourceId):
 ```
 
 If a proposed optimisation weakens that invariant, reject it.
+
+---
+
+# SQ-020 — Use schema version compatibility checks for direct clients
+
+## Status
+
+Accepted.
+
+## Decision
+
+The direct Java/PostgreSQL client must be able to fail fast when the database schema is missing or incompatible. The client reads the Flyway schema version exposed by `sequenced-queue-core` and supports opt-in validation with `validateSchemaOnBuild(true)`.
+
+The current schema version is `2`.
+
+---
+
+# SQ-021 — Keep production SQL in `sequenced-queue-core`
+
+## Status
+
+Accepted.
+
+## Decision
+
+Production queue SQL belongs in `sequenced-queue-core`. The REST server, Java REST client, Python REST client, and direct Java client must not duplicate queue state-transition SQL or bypass the shared core implementation.
+
+Server code may expose HTTP, security, metrics, and health adapters, but durable queue mutations and inspection queries remain core-owned.
+
+---
+
+# SQ-022 — Add operational readiness surface before product features
+
+## Status
+
+Accepted.
+
+## Decision
+
+After the PostgreSQL correctness checkpoint, the next priority is observability and repairability rather than batching, retention, CLI, UI, or performance features.
+
+Stage 1 adds:
+
+* Micrometer/Actuator metrics;
+* queue-specific health details;
+* transactional admin audit;
+* admin inspection endpoints;
+* structured REST error responses;
+* documentation of guarantees and operating model.

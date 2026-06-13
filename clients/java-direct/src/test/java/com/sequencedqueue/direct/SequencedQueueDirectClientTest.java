@@ -50,7 +50,7 @@ class SequencedQueueDirectClientTest {
 
     @BeforeEach
     void clearTables() throws Exception {
-        execute("TRUNCATE queue_item, queue_source_state");
+        execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
     }
 
     @Test
@@ -188,7 +188,7 @@ class SequencedQueueDirectClientTest {
 
     @Test
     void directClientReadsFlywaySchemaVersion() {
-        assertEquals("1", client.getSchemaInfo().schemaVersion());
+        assertEquals("2", client.getSchemaInfo().schemaVersion());
     }
 
     private static void applySchema(DataSource dataSource) throws Exception {

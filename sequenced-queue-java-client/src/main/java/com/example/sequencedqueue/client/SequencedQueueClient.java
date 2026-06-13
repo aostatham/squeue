@@ -112,7 +112,7 @@ public class SequencedQueueClient {
     }
 
     private HttpRequest request(String path, Object body) throws IOException {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(baseUrl.resolve(path))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(resolvePath(path))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
         if (apiKey != null && !apiKey.isBlank()) {
@@ -122,12 +122,18 @@ public class SequencedQueueClient {
     }
 
     private HttpRequest getRequest(String path) {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(baseUrl.resolve(path))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(resolvePath(path))
             .GET();
         if (apiKey != null && !apiKey.isBlank()) {
             builder.header("Authorization", "Bearer " + apiKey);
         }
         return builder.build();
+    }
+
+    private URI resolvePath(String path) {
+        String base = baseUrl.toString();
+        String suffix = path.startsWith("/") ? path.substring(1) : path;
+        return URI.create(base + "/" + suffix);
     }
 
     private static String stripSlash(String value) {

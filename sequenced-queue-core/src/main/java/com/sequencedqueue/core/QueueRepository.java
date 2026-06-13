@@ -24,6 +24,8 @@ public interface QueueRepository {
 
     List<QueueItemRow> listSourceItems(String queueName, String sourceId);
 
+    List<QueueItemRow> listDeadLettered(String queueName, int limit, int offset);
+
     QueueItemRow complete(UUID itemId, String resultJson, OffsetDateTime now);
 
     QueueItemRow fail(UUID itemId, ItemStatus status, OffsetDateTime availableAt, String errorType, String errorMessage, OffsetDateTime now);
@@ -40,6 +42,8 @@ public interface QueueRepository {
 
     List<SourceStateRow> blockedSources(String queueName);
 
+    List<BlockedSourceRow> inspectBlockedSources(String queueName, int limit, int offset);
+
     SourceStateRow findSource(String queueName, String sourceId);
 
     QueueItemRow adminStatus(UUID itemId, ItemStatus status, OffsetDateTime availableAt, OffsetDateTime now);
@@ -51,6 +55,12 @@ public interface QueueRepository {
     int blockDeadLetteredHeadSources(String queueName, OffsetDateTime now);
 
     List<QueueItemRow> expiredProcessing(OffsetDateTime now, int limit);
+
+    void insertAdminAudit(UUID auditId, OffsetDateTime occurredAt, String actorId, String operation, String queueName, String sourceId, UUID itemId, String previousStatus, String newStatus, String reason, String metadataJson);
+
+    List<AdminAuditRow> listAdminAudit(String queueName, int limit, int offset);
+
+    QueueDtos.QueueMetricsSnapshot metricsSnapshot();
 
     QueueSchemaInfo getSchemaInfo();
 }

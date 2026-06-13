@@ -21,6 +21,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EnqueueResponse"
+        default:
+          $ref: "#/components/responses/Error"
   /queues/{queueName}/claims:
     post:
       summary: Claim the head item for one available source
@@ -39,6 +41,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ClaimResponse"
+        default:
+          $ref: "#/components/responses/Error"
   /queues/{queueName}/items/{itemId}/complete:
     post:
       summary: Complete a leased item
@@ -58,6 +62,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
   /queues/{queueName}/items/{itemId}/fail:
     post:
       summary: Fail a leased item
@@ -77,6 +83,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
   /queues/{queueName}/leases/{leaseId}/heartbeat:
     post:
       summary: Extend a worker lease
@@ -97,6 +105,8 @@ paths:
       responses:
         "204":
           description: Lease extended
+        default:
+          $ref: "#/components/responses/Error"
   /queues/{queueName}/sources/{sourceId}/items:
     get:
       summary: List source items in sequence order
@@ -116,6 +126,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
   /queues/{queueName}/items/{itemId}:
     get:
       summary: Get one item
@@ -129,11 +141,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /admin/queues/{queueName}/dead-lettered:
+    get:
+      summary: List dead-lettered items
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Dead-lettered items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
   /admin/queues/{queueName}/blocked-sources:
     get:
       summary: List blocked sources
       parameters:
         - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Blocked sources
@@ -142,49 +176,12 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/SourceResponse"
-  /admin/queues/{queueName}/items/{itemId}/retry:
-    post:
-      summary: Retry a failed or dead-lettered item
-      parameters:
-        - $ref: "#/components/parameters/QueueName"
-        - $ref: "#/components/parameters/ItemId"
-      responses:
-        "200":
-          description: Retried item
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ItemResponse"
-  /admin/queues/{queueName}/items/{itemId}/skip:
-    post:
-      summary: Skip an item to unblock its source
-      parameters:
-        - $ref: "#/components/parameters/QueueName"
-        - $ref: "#/components/parameters/ItemId"
-      responses:
-        "200":
-          description: Skipped item
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ItemResponse"
-  /admin/queues/{queueName}/items/{itemId}/cancel:
-    post:
-      summary: Cancel an item
-      parameters:
-        - $ref: "#/components/parameters/QueueName"
-        - $ref: "#/components/parameters/ItemId"
-      responses:
-        "200":
-          description: Cancelled item
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ItemResponse"
-  /admin/queues/{queueName}/sources/{sourceId}/unblock:
-    post:
-      summary: Skip a dead-lettered head item and unblock a source
+                  $ref: "#/components/schemas/BlockedSourceResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /admin/queues/{queueName}/sources/{sourceId}/items:
+    get:
+      summary: List source items in sequence order for admin inspection
       parameters:
         - $ref: "#/components/parameters/QueueName"
         - name: sourceId
@@ -194,12 +191,144 @@ paths:
             type: string
       responses:
         "200":
+          description: Source items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /admin/queues/{queueName}/items/{itemId}:
+    get:
+      summary: Get one item for admin inspection
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /admin/queues/{queueName}/audit:
+    get:
+      summary: List admin audit rows
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Admin audit rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminAuditResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /admin/queues/{queueName}/items/{itemId}/retry:
+    post:
+      summary: Retry a failed or dead-lettered item
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActionRequest"
+      responses:
+        "200":
+          description: Retried item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /admin/queues/{queueName}/items/{itemId}/skip:
+    post:
+      summary: Skip an item to unblock its source
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActionRequest"
+      responses:
+        "200":
+          description: Skipped item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /admin/queues/{queueName}/items/{itemId}/cancel:
+    post:
+      summary: Cancel an item
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - $ref: "#/components/parameters/ItemId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActionRequest"
+      responses:
+        "200":
+          description: Cancelled item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemResponse"
+        default:
+          $ref: "#/components/responses/Error"
+  /admin/queues/{queueName}/sources/{sourceId}/unblock:
+    post:
+      summary: Unblock a source after the blocking head item has been repaired
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActionRequest"
+      responses:
+        "200":
           description: Unblocked source
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SourceResponse"
+        default:
+          $ref: "#/components/responses/Error"
 components:
+  responses:
+    Error:
+      description: Structured error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
   parameters:
     QueueName:
       name: queueName
@@ -214,6 +343,22 @@ components:
       schema:
         type: string
         format: uuid
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        default: 100
+        minimum: 1
+    Offset:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
   schemas:
     EnqueueRequest:
       type: object
@@ -292,3 +437,56 @@ components:
     SourceResponse:
       type: object
       additionalProperties: true
+    BlockedSourceResponse:
+      type: object
+      properties:
+        queueName: { type: string }
+        sourceId: { type: string }
+        status: { type: string }
+        leasedBy: { type: string, nullable: true }
+        leaseUntil: { type: string, format: date-time, nullable: true }
+        headItemId: { type: string, format: uuid, nullable: true }
+        headItemStatus: { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time }
+    AdminAuditResponse:
+      type: object
+      properties:
+        auditId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        actorId: { type: string, nullable: true }
+        operation: { type: string }
+        queueName: { type: string }
+        sourceId: { type: string, nullable: true }
+        itemId: { type: string, format: uuid, nullable: true }
+        previousStatus: { type: string, nullable: true }
+        newStatus: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+        metadata: { type: object, additionalProperties: true }
+    AdminActionRequest:
+      type: object
+      properties:
+        reason: { type: string, nullable: true }
+    ErrorResponse:
+      type: object
+      required: [errorCode, message, details]
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - ITEM_NOT_FOUND
+            - SOURCE_NOT_FOUND
+            - SOURCE_BLOCKED
+            - LEASE_LOST
+            - LEASE_EXPIRED
+            - ITEM_NOT_PROCESSING
+            - IDEMPOTENCY_CONFLICT
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - QUEUE_CONFLICT
+            - INTERNAL_ERROR
+        message: { type: string }
+        queueName: { type: string, nullable: true }
+        sourceId: { type: string, nullable: true }
+        itemId: { type: string, format: uuid, nullable: true }
+        details: { type: object, additionalProperties: true }

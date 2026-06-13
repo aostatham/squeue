@@ -14,6 +14,7 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 class DefaultQueueServiceTest {
     @Test
@@ -66,6 +67,19 @@ class DefaultQueueServiceTest {
         assertEquals(QueueException.CONFLICT, error.statusCode());
         assertEquals(0, repository.releaseSourceCalls);
         assertEquals(0, repository.skipDeadLetteredHeadCalls);
+    }
+
+    @Test
+    void unblockSourceRejectsWhenProcessingHeadRemains() {
+        FakeRepository repository = new FakeRepository();
+        repository.source = source(SourceStatus.blocked);
+        repository.lockedItem = item(UUID.randomUUID(), "q", "s", 1, ItemStatus.processing);
+        DefaultQueueService service = service(repository);
+
+        QueueException error = assertThrows(QueueException.class, () -> service.unblockSource("q", "s"));
+
+        assertEquals(QueueException.CONFLICT, error.statusCode());
+        assertEquals(0, repository.releaseSourceCalls);
     }
 
     @Test
@@ -123,6 +137,29 @@ class DefaultQueueServiceTest {
         assertEquals(1, repository.releaseSourceCalls);
     }
 
+    @Test
+    void rejectsNullRequestBodies() {
+        DefaultQueueService service = service(new FakeRepository());
+
+        assertBadRequest(() -> service.enqueue("q", null));
+        assertBadRequest(() -> service.claim("q", null));
+        assertBadRequest(() -> service.complete("q", UUID.randomUUID(), null));
+        assertBadRequest(() -> service.fail("q", UUID.randomUUID(), null));
+        assertBadRequest(() -> service.heartbeat("q", UUID.randomUUID(), null));
+    }
+
+    @Test
+    void rejectsInvalidNumericRequestValues() {
+        DefaultQueueService service = service(new FakeRepository());
+
+        assertBadRequest(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, null, null, null, 0)));
+        assertBadRequest(() -> service.claim("q", new ClaimRequest("worker-1", List.of("type"), 0, 1)));
+        assertBadRequest(() -> service.claim("q", new ClaimRequest("worker-1", List.of("type"), -1, 1)));
+        assertBadRequest(() -> service.heartbeat("q", UUID.randomUUID(), new HeartbeatRequest("worker-1", 0)));
+        assertBadRequest(() -> service.heartbeat("q", UUID.randomUUID(), new HeartbeatRequest("worker-1", -1)));
+        assertBadRequest(() -> service.fail("q", UUID.randomUUID(), new FailRequest("worker-1", UUID.randomUUID(), true, "ERR", "bad", -1)));
+    }
+
     private DefaultQueueService service(FakeRepository repository) {
         TransactionRunner transactions = new TransactionRunner() {
             @Override
@@ -145,6 +182,11 @@ class DefaultQueueServiceTest {
         return new SourceStateRow("q", "s", 1, status, status == SourceStatus.leased ? "worker-1" : null, status == SourceStatus.leased ? UUID.randomUUID() : null, status == SourceStatus.leased ? now().plusSeconds(60) : null, now(), now());
     }
 
+    private static void assertBadRequest(Executable executable) {
+        QueueException error = assertThrows(QueueException.class, executable);
+        assertEquals(QueueException.BAD_REQUEST, error.statusCode());
+    }
+
     private static final class FakeRepository implements QueueRepository {
         SourceStateRow source = source(SourceStatus.idle);
         QueueItemRow lockedItem = item(UUID.randomUUID(), "q", "s", 1, ItemStatus.pending);
@@ -158,8 +200,10 @@ class DefaultQueueServiceTest {
         int failCalls;
         int adminStatusCalls;
         int skipDeadLetteredHeadCalls;
+        int adminAuditCalls;
         UUID lastMatchedLeaseId;
         final List<QueueItemRow> expiredItems = new ArrayList<>();
+        final List<AdminAuditRow> auditRows = new ArrayList<>();
 
         @Override
         public Optional<QueueItemRow> findByIdempotencyKey(String queueName, String idempotencyKey) {
@@ -210,6 +254,11 @@ class DefaultQueueServiceTest {
         }
 
         @Override
+        public List<QueueItemRow> listDeadLettered(String queueName, int limit, int offset) {
+            return List.of();
+        }
+
+        @Override
         public QueueItemRow complete(UUID itemId, String resultJson, OffsetDateTime now) {
             return lockedItem;
         }
@@ -252,6 +301,11 @@ class DefaultQueueServiceTest {
         }
 
         @Override
+        public List<BlockedSourceRow> inspectBlockedSources(String queueName, int limit, int offset) {
+            return List.of();
+        }
+
+        @Override
         public SourceStateRow findSource(String queueName, String sourceId) {
             return source;
         }
@@ -270,6 +324,9 @@ class DefaultQueueServiceTest {
 
         @Override
         public Optional<QueueItemRow> findHeadBlockingItem(String queueName, String sourceId) {
+            if (List.of(ItemStatus.succeeded, ItemStatus.cancelled, ItemStatus.skipped, ItemStatus.failed).contains(lockedItem.status())) {
+                return Optional.empty();
+            }
             return Optional.of(lockedItem);
         }
 
@@ -285,8 +342,24 @@ class DefaultQueueServiceTest {
         }
 
         @Override
+        public void insertAdminAudit(UUID auditId, OffsetDateTime occurredAt, String actorId, String operation, String queueName, String sourceId, UUID itemId, String previousStatus, String newStatus, String reason, String metadataJson) {
+            adminAuditCalls++;
+            auditRows.add(new AdminAuditRow(auditId, occurredAt, actorId, operation, queueName, sourceId, itemId, previousStatus, newStatus, reason, metadataJson));
+        }
+
+        @Override
+        public List<AdminAuditRow> listAdminAudit(String queueName, int limit, int offset) {
+            return auditRows;
+        }
+
+        @Override
+        public QueueMetricsSnapshot metricsSnapshot() {
+            return new QueueMetricsSnapshot(0, 0, 0, 0, 0, 0, 0);
+        }
+
+        @Override
         public QueueSchemaInfo getSchemaInfo() {
-            return new QueueSchemaInfo("1");
+            return new QueueSchemaInfo("2");
         }
     }
 }
