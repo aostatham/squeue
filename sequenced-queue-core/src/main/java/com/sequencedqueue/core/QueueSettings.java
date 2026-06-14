@@ -7,10 +7,11 @@ public record QueueSettings(
     int maxPayloadBytes,
     int maxHeadersBytes,
     int maxErrorMessageBytes,
-    int maxAdminReasonBytes
+    int maxAdminReasonBytes,
+    int maxRetentionPurgeBatchSize
 ) {
     public static QueueSettings defaults() {
-        return new QueueSettings(60, 600, 5, 262_144, 65_536, 8_192, 2_048);
+        return new QueueSettings(60, 600, 5, 262_144, 65_536, 8_192, 2_048, 10_000);
     }
 
     public QueueSettings {
@@ -37,6 +38,9 @@ public record QueueSettings(
         }
         if (maxAdminReasonBytes <= 0) {
             throw new IllegalArgumentException("maxAdminReasonBytes must be > 0");
+        }
+        if (maxRetentionPurgeBatchSize <= 0) {
+            throw new IllegalArgumentException("maxRetentionPurgeBatchSize must be > 0");
         }
     }
 }

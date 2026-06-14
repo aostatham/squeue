@@ -22,7 +22,8 @@ public class QueueConfiguration {
         @Value("${sequenced-queue.max-payload-bytes:262144}") int maxPayloadBytes,
         @Value("${sequenced-queue.max-headers-bytes:65536}") int maxHeadersBytes,
         @Value("${sequenced-queue.max-error-message-bytes:8192}") int maxErrorMessageBytes,
-        @Value("${sequenced-queue.max-admin-reason-bytes:2048}") int maxAdminReasonBytes
+        @Value("${sequenced-queue.max-admin-reason-bytes:2048}") int maxAdminReasonBytes,
+        @Value("${sequenced-queue.max-retention-purge-batch-size:10000}") int maxRetentionPurgeBatchSize
     ) {
         QueueSettings settings = new QueueSettings(
             defaultLeaseSeconds,
@@ -31,7 +32,8 @@ public class QueueConfiguration {
             maxPayloadBytes,
             maxHeadersBytes,
             maxErrorMessageBytes,
-            maxAdminReasonBytes
+            maxAdminReasonBytes,
+            maxRetentionPurgeBatchSize
         );
         return QueueCoreFactory.create(dataSource, objectMapper, settings);
     }

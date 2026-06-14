@@ -19,7 +19,8 @@ public final class QueueCoreFactory {
             defaults.maxPayloadBytes(),
             defaults.maxHeadersBytes(),
             defaults.maxErrorMessageBytes(),
-            defaults.maxAdminReasonBytes()
+            defaults.maxAdminReasonBytes(),
+            defaults.maxRetentionPurgeBatchSize()
         ));
     }
 

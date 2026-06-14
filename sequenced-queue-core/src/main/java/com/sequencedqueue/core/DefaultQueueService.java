@@ -40,7 +40,8 @@ public class DefaultQueueService implements QueueOperations {
             QueueSettings.defaults().maxPayloadBytes(),
             QueueSettings.defaults().maxHeadersBytes(),
             QueueSettings.defaults().maxErrorMessageBytes(),
-            QueueSettings.defaults().maxAdminReasonBytes()
+            QueueSettings.defaults().maxAdminReasonBytes(),
+            QueueSettings.defaults().maxRetentionPurgeBatchSize()
         ));
     }
 
@@ -102,7 +103,7 @@ public class DefaultQueueService implements QueueOperations {
             }
             int updated = repository.heartbeat(queueName, leaseId, request.workerId(), now().plusSeconds(extendBy), now());
             if (updated == 0) {
-                throw new QueueException(QueueException.CONFLICT, "lease is not active for worker").withQueueName(queueName);
+                throw new QueueException(QueueErrorCode.LEASE_LOST, QueueException.CONFLICT, "lease is not active for worker").withQueueName(queueName);
             }
         });
     }
@@ -111,7 +112,7 @@ public class DefaultQueueService implements QueueOperations {
     public ItemResponse getItem(String queueName, UUID itemId) {
         return transactions.inTransaction(() -> repository.findItem(queueName, itemId)
             .map(this::toItemResponse)
-            .orElseThrow(() -> new QueueException(QueueException.NOT_FOUND, "item not found").withContext(queueName, null, itemId)));
+            .orElseThrow(() -> new QueueException(QueueErrorCode.ITEM_NOT_FOUND, QueueException.NOT_FOUND, "item not found").withContext(queueName, null, itemId)));
     }
 
     @Override
@@ -146,11 +147,11 @@ public class DefaultQueueService implements QueueOperations {
             OffsetDateTime now = now();
             SourceStateRow source = repository.lockSource(queueName, sourceId);
             if (source.status() != SourceStatus.blocked) {
-                throw new QueueException(QueueException.CONFLICT, "source is not blocked").withContext(queueName, sourceId, null);
+                throw new QueueException(QueueErrorCode.SOURCE_BLOCKED, QueueException.CONFLICT, "source is not blocked").withContext(queueName, sourceId, null);
             }
             Optional<QueueItemRow> head = repository.findHeadBlockingItem(queueName, sourceId);
             if (head.isPresent()) {
-                throw new QueueException(QueueException.CONFLICT, "blocking head remains; use retry, skip, or cancel on the item").withContext(queueName, sourceId, head.get().itemId());
+                throw new QueueException(QueueErrorCode.SOURCE_BLOCKED, QueueException.CONFLICT, "blocking head remains; use retry, skip, or cancel on the item").withContext(queueName, sourceId, head.get().itemId());
             }
             repository.releaseSource(queueName, sourceId, now);
             SourceStateRow released = repository.findSource(queueName, sourceId);
@@ -203,16 +204,18 @@ public class DefaultQueueService implements QueueOperations {
             throw new QueueException(QueueException.BAD_REQUEST, "olderThan is required").withQueueName(queueName);
         }
         List<ItemStatus> statuses = retentionStatuses(request.statuses(), queueName);
+        int limit = retentionLimit(request.limit(), queueName);
         boolean dryRun = Boolean.TRUE.equals(request.dryRun());
         return transactions.inTransaction(() -> {
-            long matched = repository.countRetentionEligible(queueName, request.olderThan(), statuses);
+            long matched = repository.countRetentionEligible(queueName, request.olderThan(), statuses, limit);
             if (dryRun) {
                 return new RetentionPurgeResponse(queueName, true, matched, 0);
             }
-            long deleted = repository.deleteRetentionEligible(queueName, request.olderThan(), statuses);
+            long deleted = repository.deleteRetentionEligible(queueName, request.olderThan(), statuses, limit);
             insertAudit(actorId, "retention_purge", queueName, null, null, null, null, request.reason(), Map.of(
                 "olderThan", request.olderThan().toString(),
                 "statuses", statuses.stream().map(Enum::name).toList(),
+                "limit", limit,
                 "matched", matched,
                 "deleted", deleted
             ));
@@ -341,23 +344,23 @@ public class DefaultQueueService implements QueueOperations {
             throw new QueueException(QueueException.BAD_REQUEST, "leaseId is required");
         }
         QueueItemRow candidate = repository.findItem(queueName, itemId)
-            .orElseThrow(() -> new QueueException(QueueException.NOT_FOUND, "item not found").withContext(queueName, null, itemId));
+            .orElseThrow(() -> new QueueException(QueueErrorCode.ITEM_NOT_FOUND, QueueException.NOT_FOUND, "item not found").withContext(queueName, null, itemId));
         SourceStateRow source = repository.lockSource(candidate.queueName(), candidate.sourceId());
         QueueItemRow item = repository.lockItem(queueName, itemId);
         if (!item.sourceId().equals(candidate.sourceId())) {
-            throw new QueueException(QueueException.CONFLICT, "item source changed while locking").withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.QUEUE_CONFLICT, QueueException.CONFLICT, "item source changed while locking").withContext(item.queueName(), item.sourceId(), item.itemId());
         }
         if (item.status() != ItemStatus.processing) {
-            throw new QueueException(QueueException.CONFLICT, "item is not processing").withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.ITEM_NOT_PROCESSING, QueueException.CONFLICT, "item is not processing").withContext(item.queueName(), item.sourceId(), item.itemId());
         }
         if (!workerId.equals(item.claimedBy()) || !leaseId.equals(item.leaseId())) {
-            throw new QueueException(QueueException.CONFLICT, "lease is not held by worker").withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.LEASE_LOST, QueueException.CONFLICT, "lease is not held by worker").withContext(item.queueName(), item.sourceId(), item.itemId());
         }
         if (item.leaseUntil() == null || !item.leaseUntil().isAfter(now())) {
-            throw new QueueException(QueueException.CONFLICT, "lease has expired").withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.LEASE_EXPIRED, QueueException.CONFLICT, "lease has expired").withContext(item.queueName(), item.sourceId(), item.itemId());
         }
         if (source.status() != SourceStatus.leased || !workerId.equals(source.leasedBy()) || !leaseId.equals(source.leaseId())) {
-            throw new QueueException(QueueException.CONFLICT, "source lease is not held by worker").withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.LEASE_LOST, QueueException.CONFLICT, "source lease is not held by worker").withContext(item.queueName(), item.sourceId(), item.itemId());
         }
         return item;
     }
@@ -365,7 +368,7 @@ public class DefaultQueueService implements QueueOperations {
     private ItemResponse adminRepair(String queueName, UUID itemId, ItemStatus targetStatus, List<ItemStatus> allowedStatuses, String operation, String actorId, String reason) {
         validateAdminReason(reason, queueName);
         QueueItemRow candidate = repository.findItem(queueName, itemId)
-            .orElseThrow(() -> new QueueException(QueueException.NOT_FOUND, "item not found").withContext(queueName, null, itemId));
+            .orElseThrow(() -> new QueueException(QueueErrorCode.ITEM_NOT_FOUND, QueueException.NOT_FOUND, "item not found").withContext(queueName, null, itemId));
         SourceStateRow source = repository.lockSource(candidate.queueName(), candidate.sourceId());
         QueueItemRow item = repository.lockItem(queueName, itemId);
         ensureAdminRepairAllowed(item, candidate, source, allowedStatuses);
@@ -378,18 +381,18 @@ public class DefaultQueueService implements QueueOperations {
 
     private void ensureAdminRepairAllowed(QueueItemRow item, QueueItemRow candidate, SourceStateRow source, List<ItemStatus> allowedStatuses) {
         if (!item.sourceId().equals(candidate.sourceId())) {
-            throw new QueueException(QueueException.CONFLICT, "item source changed while locking").withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.QUEUE_CONFLICT, QueueException.CONFLICT, "item source changed while locking").withContext(item.queueName(), item.sourceId(), item.itemId());
         }
         if (!allowedStatuses.contains(item.status())) {
-            throw new QueueException(QueueException.CONFLICT, "admin repair is not allowed for item status " + item.status()).withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.QUEUE_CONFLICT, QueueException.CONFLICT, "admin repair is not allowed for item status " + item.status()).withContext(item.queueName(), item.sourceId(), item.itemId());
         }
         if (source.status() == SourceStatus.leased) {
-            throw new QueueException(QueueException.CONFLICT, "admin repair cannot modify an actively leased source").withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.QUEUE_CONFLICT, QueueException.CONFLICT, "admin repair cannot modify an actively leased source").withContext(item.queueName(), item.sourceId(), item.itemId());
         }
         QueueItemRow head = repository.findHeadBlockingItem(item.queueName(), item.sourceId())
-            .orElseThrow(() -> new QueueException(QueueException.CONFLICT, "source has no blocking head item").withContext(item.queueName(), item.sourceId(), item.itemId()));
+            .orElseThrow(() -> new QueueException(QueueErrorCode.QUEUE_CONFLICT, QueueException.CONFLICT, "source has no blocking head item").withContext(item.queueName(), item.sourceId(), item.itemId()));
         if (!head.itemId().equals(item.itemId())) {
-            throw new QueueException(QueueException.CONFLICT, "admin repair item is not the source head item").withContext(item.queueName(), item.sourceId(), item.itemId());
+            throw new QueueException(QueueErrorCode.QUEUE_CONFLICT, QueueException.CONFLICT, "admin repair item is not the source head item").withContext(item.queueName(), item.sourceId(), item.itemId());
         }
     }
 
@@ -521,6 +524,17 @@ public class DefaultQueueService implements QueueOperations {
             throw new QueueException(QueueException.BAD_REQUEST, "retention purge is not allowed for status " + status).withQueueName(queueName);
         }
         return itemStatus;
+    }
+
+    private int retentionLimit(Integer requestedLimit, String queueName) {
+        int limit = requestedLimit == null ? 1000 : requestedLimit;
+        if (limit < 1) {
+            throw new QueueException(QueueException.BAD_REQUEST, "limit must be >= 1").withQueueName(queueName);
+        }
+        if (limit > settings.maxRetentionPurgeBatchSize()) {
+            throw new QueueException(QueueException.BAD_REQUEST, "limit must be <= " + settings.maxRetentionPurgeBatchSize()).withQueueName(queueName);
+        }
+        return limit;
     }
 
     private String writeJson(Map<String, Object> value) {

@@ -165,7 +165,7 @@ class DefaultQueueServiceTest {
     @Test
     void payloadWithinLimitIsAcceptedAndOmittedMaxAttemptsUsesDefault() {
         FakeRepository repository = new FakeRepository();
-        DefaultQueueService service = service(repository, new QueueSettings(60, 120, 7, 32, 32, 32, 32));
+        DefaultQueueService service = service(repository, new QueueSettings(60, 120, 7, 32, 32, 32, 32, 100));
 
         EnqueueResponse response = service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of("x", "y"), Map.of(), null, null));
 
@@ -175,28 +175,28 @@ class DefaultQueueServiceTest {
 
     @Test
     void enqueueRejectsPayloadOverLimit() {
-        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 8, 32, 32, 32));
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 8, 32, 32, 32, 100));
 
         assertBadRequest(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of("tooLarge", "value"), Map.of(), null, null)));
     }
 
     @Test
     void enqueueRejectsHeadersOverLimit() {
-        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 8, 32, 32));
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 8, 32, 32, 100));
 
         assertBadRequest(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of(), Map.of("tooLarge", "value"), null, null)));
     }
 
     @Test
     void failRejectsErrorMessageOverLimit() {
-        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 4, 32));
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 4, 32, 100));
 
         assertBadRequest(() -> service.fail("q", UUID.randomUUID(), new FailRequest("worker-1", UUID.randomUUID(), false, "ERR", "12345", null)));
     }
 
     @Test
     void claimRejectsLeaseSecondsOverMax() {
-        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 32, 32));
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 32, 32, 100));
 
         assertBadRequest(() -> service.claim("q", new ClaimRequest("worker-1", List.of("type"), 121, 1)));
     }
@@ -204,7 +204,7 @@ class DefaultQueueServiceTest {
     @Test
     void adminOperationsRejectReasonOverLimit() {
         FakeRepository repository = new FakeRepository();
-        DefaultQueueService service = service(repository, new QueueSettings(60, 120, 5, 64, 64, 32, 4));
+        DefaultQueueService service = service(repository, new QueueSettings(60, 120, 5, 64, 64, 32, 4, 100));
         String reason = "12345";
 
         assertBadRequest(() -> service.retry("q", repository.lockedItem.itemId(), "admin", reason));
@@ -225,6 +225,20 @@ class DefaultQueueServiceTest {
     }
 
     @Test
+    void retentionPurgeRejectsZeroLimit() {
+        DefaultQueueService service = service(new FakeRepository());
+
+        assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded"), false, "cleanup", 0)));
+    }
+
+    @Test
+    void retentionPurgeRejectsLimitAboveMax() {
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 32, 32, 10));
+
+        assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded"), false, "cleanup", 11)));
+    }
+
+    @Test
     void retentionDryRunCountsWithoutDeletingOrAuditing() {
         FakeRepository repository = new FakeRepository();
         repository.retentionMatched = 7;
@@ -234,6 +248,7 @@ class DefaultQueueServiceTest {
 
         assertEquals(7, response.matched());
         assertEquals(0, response.deleted());
+        assertEquals(1000, repository.retentionLimit);
         assertEquals(0, repository.retentionDeleteCalls);
         assertEquals(0, repository.adminAuditCalls);
     }
@@ -245,10 +260,11 @@ class DefaultQueueServiceTest {
         repository.retentionDeleted = 4;
         DefaultQueueService service = service(repository);
 
-        RetentionPurgeResponse response = service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded", "cancelled", "skipped", "failed"), false, "cleanup"), "admin-api-key");
+        RetentionPurgeResponse response = service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded", "cancelled", "skipped", "failed"), false, "cleanup", 3), "admin-api-key");
 
         assertEquals(5, response.matched());
         assertEquals(4, response.deleted());
+        assertEquals(3, repository.retentionLimit);
         assertEquals(1, repository.retentionDeleteCalls);
         assertEquals(1, repository.adminAuditCalls);
         assertEquals("retention_purge", repository.auditRows.getFirst().operation());
@@ -303,6 +319,7 @@ class DefaultQueueServiceTest {
         int retentionDeleteCalls;
         long retentionMatched;
         long retentionDeleted;
+        int retentionLimit;
         UUID lastMatchedLeaseId;
         final List<QueueItemRow> expiredItems = new ArrayList<>();
         final List<AdminAuditRow> auditRows = new ArrayList<>();
@@ -456,12 +473,14 @@ class DefaultQueueServiceTest {
         }
 
         @Override
-        public long countRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+        public long countRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses, int limit) {
+            retentionLimit = limit;
             return retentionMatched;
         }
 
         @Override
-        public long deleteRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+        public long deleteRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses, int limit) {
+            retentionLimit = limit;
             retentionDeleteCalls++;
             return retentionDeleted;
         }

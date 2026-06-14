@@ -448,27 +448,42 @@ public class PostgresQueueRepository implements QueueRepository {
     }
 
     @Override
-    public long countRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+    public long countRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses, int limit) {
         String placeholders = statusPlaceholders(statuses);
         List<Object> args = retentionArgs(queueName, olderThan, statuses);
+        args.add(limit);
         return query("""
             SELECT count(*) AS row_count
-            FROM queue_item
-            WHERE queue_name = ?
-              AND updated_at < ?
-              AND status IN (%s)
+            FROM (
+                SELECT item_id
+                FROM queue_item
+                WHERE queue_name = ?
+                  AND updated_at < ?
+                  AND status IN (%s)
+                ORDER BY updated_at, item_id
+                LIMIT ?
+            ) eligible
             """.formatted(placeholders), rs -> rs.getLong("row_count"), args.toArray()).getFirst();
     }
 
     @Override
-    public long deleteRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses) {
+    public long deleteRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses, int limit) {
         String placeholders = statusPlaceholders(statuses);
         List<Object> args = retentionArgs(queueName, olderThan, statuses);
+        args.add(limit);
         return update("""
-            DELETE FROM queue_item
-            WHERE queue_name = ?
-              AND updated_at < ?
-              AND status IN (%s)
+            WITH eligible AS (
+                SELECT item_id
+                FROM queue_item
+                WHERE queue_name = ?
+                  AND updated_at < ?
+                  AND status IN (%s)
+                ORDER BY updated_at, item_id
+                LIMIT ?
+            )
+            DELETE FROM queue_item q
+            USING eligible e
+            WHERE q.item_id = e.item_id
             """.formatted(placeholders), args.toArray());
     }
 

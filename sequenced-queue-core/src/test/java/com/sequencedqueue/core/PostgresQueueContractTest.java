@@ -409,6 +409,21 @@ class PostgresQueueContractTest {
     }
 
     @Test
+    void retentionPurgeDryRunDoesNotDelete() throws Exception {
+        oldItem("dry-run-1", "succeeded");
+        oldItem("dry-run-2", "failed");
+
+        RetentionPurgeResponse response = queue.purgeRetention(QUEUE,
+            new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("succeeded", "failed"), true, "dry run", 1),
+            "admin-api-key");
+
+        assertEquals(1, response.matched());
+        assertEquals(0, response.deleted());
+        assertEquals(2, count("queue_item"));
+        assertEquals(0, count("queue_admin_audit"));
+    }
+
+    @Test
     void retentionPurgeDeletesOnlyEligibleTerminalRowsAndWritesAudit() throws Exception {
         oldItem("old-succeeded", "succeeded");
         oldItem("old-cancelled", "cancelled");
@@ -434,9 +449,57 @@ class PostgresQueueContractTest {
     }
 
     @Test
+    void retentionPurgeDeletesAtMostLimit() throws Exception {
+        oldItem("bounded-1", "succeeded");
+        oldItem("bounded-2", "succeeded");
+        oldItem("bounded-3", "succeeded");
+
+        RetentionPurgeResponse response = queue.purgeRetention(QUEUE,
+            new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("succeeded"), false, "delete bounded", 2),
+            "admin-api-key");
+
+        assertEquals(2, response.matched());
+        assertEquals(2, response.deleted());
+        assertEquals(1, count("queue_item"));
+    }
+
+    @Test
+    void retentionPurgeRejectsZeroLimit() {
+        QueueException error = assertThrows(QueueException.class, () -> queue.purgeRetention(QUEUE,
+            new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("succeeded"), false, "bad", 0),
+            "admin-api-key"));
+
+        assertEquals(QueueException.BAD_REQUEST, error.statusCode());
+    }
+
+    @Test
+    void retentionPurgeRejectsLimitAboveMax() {
+        JdbcTransactionRunner boundedTransactions = new JdbcTransactionRunner(dataSource);
+        PostgresQueueRepository boundedRepository = new PostgresQueueRepository(boundedTransactions);
+        DefaultQueueService boundedQueue = new DefaultQueueService(boundedRepository, boundedTransactions, new RetryPolicy(), new ObjectMapper(), java.time.Clock.systemUTC(),
+            new QueueSettings(60, 600, 5, 262_144, 65_536, 8_192, 2_048, 2));
+
+        QueueException error = assertThrows(QueueException.class, () -> boundedQueue.purgeRetention(QUEUE,
+            new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("succeeded"), false, "bad", 3),
+            "admin-api-key"));
+
+        assertEquals(QueueException.BAD_REQUEST, error.statusCode());
+    }
+
+    @Test
     void retentionPurgeRejectsBlockingStatuses() throws Exception {
         QueueException error = assertThrows(QueueException.class, () -> queue.purgeRetention(QUEUE,
             new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("dead_lettered"), false, "bad"),
+            "admin-api-key"));
+
+        assertEquals(QueueException.BAD_REQUEST, error.statusCode());
+        assertEquals(0, count("queue_admin_audit"));
+    }
+
+    @Test
+    void retentionPurgeStillRejectsBlockingStatuses() throws Exception {
+        QueueException error = assertThrows(QueueException.class, () -> queue.purgeRetention(QUEUE,
+            new RetentionPurgeRequest(OffsetDateTime.now().plusYears(100), List.of("pending", "processing", "retry_wait", "dead_lettered"), false, "bad", 1),
             "admin-api-key"));
 
         assertEquals(QueueException.BAD_REQUEST, error.statusCode());
@@ -494,7 +557,7 @@ class PostgresQueueContractTest {
 
     @Test
     void schemaInfoReportsFlywayVersion() {
-        assertEquals("3", queue.getSchemaInfo().schemaVersion());
+        assertEquals("4", queue.getSchemaInfo().schemaVersion());
     }
 
     private EnqueueResponse enqueue(String sourceId) {

@@ -1,0 +1,14 @@
+package com.sequencedqueue.core;
+
+public enum QueueErrorCode {
+    VALIDATION_ERROR,
+    ITEM_NOT_FOUND,
+    SOURCE_NOT_FOUND,
+    IDEMPOTENCY_CONFLICT,
+    SOURCE_BLOCKED,
+    LEASE_LOST,
+    LEASE_EXPIRED,
+    ITEM_NOT_PROCESSING,
+    QUEUE_CONFLICT,
+    INTERNAL_ERROR
+}

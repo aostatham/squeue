@@ -1,10 +1,10 @@
 # Versioning and Schema Compatibility
 
-The current queue schema version is `3`.
+The current queue schema version is `4`.
 
 The REST server and trusted direct Java client read Flyway schema history through `sequenced-queue-core`.
 
-The direct Java client requires schema version `3`. When `validateSchemaOnBuild(true)` is enabled, the direct client builder fails fast if the current schema version is missing or incompatible.
+The direct Java client requires schema version `4`. When `validateSchemaOnBuild(true)` is enabled, the direct client builder fails fast if the current schema version is missing or incompatible.
 
 Migration policy:
 

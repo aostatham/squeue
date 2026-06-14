@@ -103,6 +103,18 @@ Run the required Docker-backed PostgreSQL contract suite:
 ./mvnw verify -Ppostgres-contract
 ```
 
+Run the developer-facing examples/OpenAPI/client contract suite:
+
+```sh
+./mvnw verify -Pdeveloper-contract
+```
+
+Run both suites:
+
+```sh
+./mvnw verify -Pfull-contract
+```
+
 Run Python client tests:
 
 ```sh
@@ -141,13 +153,13 @@ curl -X POST \
   "http://localhost:8080/admin/queues/wf.commands/items/{itemId}/skip"
 ```
 
-Manual retention purge is admin-only and deletes only old passable terminal rows. Dry-run first:
+Manual retention purge is admin-only and deletes only old passable terminal rows. `limit` defaults to `1000` and is capped by `sequenced-queue.max-retention-purge-batch-size`. Dry-run first:
 
 ```sh
 curl -X POST \
   -H "Authorization: Bearer dev-admin-key" \
   -H "Content-Type: application/json" \
-  -d '{"olderThan":"2026-01-01T00:00:00Z","statuses":["succeeded","cancelled","skipped","failed"],"dryRun":true,"reason":"quickstart preview"}' \
+  -d '{"olderThan":"2026-01-01T00:00:00Z","statuses":["succeeded","cancelled","skipped","failed"],"dryRun":true,"reason":"quickstart preview","limit":1000}' \
   "http://localhost:8080/admin/queues/wf.commands/retention/purge"
 ```
 
@@ -184,7 +196,7 @@ SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
     .build();
 ```
 
-The direct client delegates to `sequenced-queue-core`. It requires schema version `3`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema version is not `3`, the builder throws `QueueUnavailableException` and the client is not created.
+The direct client delegates to `sequenced-queue-core`. It requires schema version `4`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema version is not `4`, the builder throws `QueueUnavailableException` and the client is not created.
 
 See [Versioning](versioning.md) for schema compatibility policy and [Security](security.md) for least-privilege database role guidance.
 

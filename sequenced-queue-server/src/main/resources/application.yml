@@ -17,6 +17,7 @@ sequenced-queue:
   max-headers-bytes: 65536
   max-error-message-bytes: 8192
   max-admin-reason-bytes: 2048
+  max-retention-purge-batch-size: 10000
   api-key: ${SEQUENCED_QUEUE_API_KEY:dev-key}
   admin-api-key: ${SEQUENCED_QUEUE_ADMIN_API_KEY:dev-admin-key}
   recovery-enabled: ${SEQUENCED_QUEUE_RECOVERY_ENABLED:true}

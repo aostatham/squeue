@@ -60,9 +60,9 @@ public interface QueueRepository {
 
     List<AdminAuditRow> listAdminAudit(String queueName, int limit, int offset);
 
-    long countRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses);
+    long countRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses, int limit);
 
-    long deleteRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses);
+    long deleteRetentionEligible(String queueName, OffsetDateTime olderThan, List<ItemStatus> statuses, int limit);
 
     QueueDtos.QueueMetricsSnapshot metricsSnapshot();
 

@@ -15,13 +15,14 @@ class QueueConfigurationTest {
         DataSource dataSource = mock(DataSource.class);
         ObjectMapper objectMapper = new ObjectMapper();
 
-        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 0, 600, 5, 100, 100, 100, 100));
-        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 0, 5, 100, 100, 100, 100));
-        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 601, 600, 5, 100, 100, 100, 100));
-        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 0, 100, 100, 100, 100));
-        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 0, 100, 100, 100));
-        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 100, 0, 100, 100));
-        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 100, 100, 0, 100));
-        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 100, 100, 100, 0));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 0, 600, 5, 100, 100, 100, 100, 100));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 0, 5, 100, 100, 100, 100, 100));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 601, 600, 5, 100, 100, 100, 100, 100));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 0, 100, 100, 100, 100, 100));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 0, 100, 100, 100, 100));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 100, 0, 100, 100, 100));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 100, 100, 0, 100, 100));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 100, 100, 100, 0, 100));
+        assertThrows(IllegalArgumentException.class, () -> configuration.queueOperations(dataSource, objectMapper, 60, 600, 5, 100, 100, 100, 100, 0));
     }
 }

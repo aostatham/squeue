@@ -125,7 +125,7 @@ Normal worker and producer operations do not write admin audit rows. This includ
 
 Retention is manual only. There is no scheduler, archive table, or automatic retention policy.
 
-`POST /admin/queues/{queueName}/retention/purge` deletes old passable terminal items by `updated_at`.
+`POST /admin/queues/{queueName}/retention/purge` deletes old passable terminal items by `updated_at`. `limit` defaults to `1000` and cannot exceed the global `maxRetentionPurgeBatchSize`.
 
 Eligible statuses:
 
@@ -141,7 +141,7 @@ Ineligible statuses:
 - `retry_wait`
 - `dead_lettered`
 
-`dryRun: true` counts matches without deleting rows and does not write admin audit. Actual purge writes an admin audit row.
+`dryRun: true` counts the same bounded eligibility set without deleting rows and does not write admin audit. Actual purge writes an admin audit row.
 
 ## Configuration Model
 
@@ -187,4 +187,4 @@ The REST server delegates queue operations to `sequenced-queue-core`.
 
 The trusted direct Java client also delegates to `sequenced-queue-core` and uses the same production SQL and semantics. It bypasses REST API-key security and is only for trusted/internal Java deployments with direct PostgreSQL access.
 
-The direct Java client requires the core Flyway migration to be applied. The current required schema version is `3`, and `validateSchemaOnBuild(true)` fails fast when the schema is missing or incompatible.
+The direct Java client requires the core Flyway migration to be applied. The current required schema version is `4`, and `validateSchemaOnBuild(true)` fails fast when the schema is missing or incompatible.

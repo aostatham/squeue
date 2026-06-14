@@ -671,6 +671,8 @@ paths:
         Deletes only old items in passable terminal statuses: succeeded,
         cancelled, skipped, and failed. Blocking statuses pending,
         processing, retry_wait, and dead_lettered are never eligible.
+        Requests are bounded by limit, which defaults to 1000 and cannot
+        exceed the server max retention purge batch size.
       security:
         - AdminApiKey: []
       parameters:
@@ -688,12 +690,14 @@ paths:
                   statuses: ["succeeded", "cancelled", "skipped", "failed"]
                   dryRun: true
                   reason: "monthly cleanup preview"
+                  limit: 1000
               actual:
                 value:
                   olderThan: "2026-01-01T00:00:00Z"
                   statuses: ["succeeded", "cancelled", "skipped", "failed"]
                   dryRun: false
                   reason: "monthly cleanup"
+                  limit: 1000
       responses:
         "200":
           description: Purge result
@@ -1007,6 +1011,12 @@ components:
         dryRun:
           type: boolean
           default: true
+        limit:
+          type: integer
+          format: int32
+          minimum: 1
+          default: 1000
+          description: Maximum number of eligible rows to count or delete.
         reason:
           type: string
           nullable: true

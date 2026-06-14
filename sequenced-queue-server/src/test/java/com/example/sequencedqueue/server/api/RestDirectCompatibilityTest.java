@@ -15,7 +15,7 @@ import com.sequencedqueue.direct.ClaimResponse;
 import com.sequencedqueue.direct.CompleteRequest;
 import com.sequencedqueue.direct.EnqueueRequest;
 import com.sequencedqueue.direct.FailRequest;
-import com.sequencedqueue.direct.QueueConflictException;
+import com.sequencedqueue.direct.LeaseLostException;
 import com.sequencedqueue.direct.SequencedQueueDirectClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -101,7 +101,7 @@ class RestDirectCompatibilityTest {
         UUID itemId = UUID.fromString((String) restEnqueue("source-1", 5).getBody().get("itemId"));
         restClaim("worker-1");
 
-        org.junit.jupiter.api.Assertions.assertThrows(QueueConflictException.class, () ->
+        org.junit.jupiter.api.Assertions.assertThrows(LeaseLostException.class, () ->
             direct.complete(QUEUE, itemId, new CompleteRequest("worker-1", UUID.randomUUID(), Map.of())));
     }
 

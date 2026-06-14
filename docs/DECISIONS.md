@@ -132,7 +132,7 @@ Database transactions are used for enqueue, claim, complete, fail, heartbeat, re
 
 Status: Accepted.
 
-Direct Java schema compatibility is implemented using Flyway schema version lookup through `sequenced-queue-core`. The direct Java client currently requires schema version `3`.
+Direct Java schema compatibility is implemented using Flyway schema version lookup through `sequenced-queue-core`. The direct Java client currently requires schema version `4`.
 
 Trusted direct Java deployments may call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` to fail fast when the schema is missing or incompatible.
 
@@ -183,11 +183,11 @@ CLI, UI, batching, `LISTEN/NOTIFY`, broker bridges, benchmark harness, queue-lev
 
 Status: Accepted.
 
-Retention is a manual admin operation, not a scheduler. It deletes only old passable terminal items: `succeeded`, `cancelled`, `skipped`, and `failed`.
+Retention is a manual admin operation, not a scheduler. It deletes only old passable terminal items: `succeeded`, `cancelled`, `skipped`, and `failed`. Each purge is bounded by request `limit`, which defaults to `1000` and cannot exceed the global `maxRetentionPurgeBatchSize`.
 
 Retention never purges `pending`, `processing`, `retry_wait`, or `dead_lettered` rows because those statuses can affect source progression or operational repair.
 
-Actual retention purge writes admin audit. Dry-run purge counts rows without deleting and does not write audit.
+Actual retention purge writes admin audit. Dry-run purge counts the same bounded eligibility set without deleting and does not write audit.
 
 ## SQ-027 - Keep API Keys Config-Only
 

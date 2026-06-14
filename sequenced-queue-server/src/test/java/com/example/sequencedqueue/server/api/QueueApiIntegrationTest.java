@@ -188,6 +188,23 @@ class QueueApiIntegrationTest {
     }
 
     @Test
+    void adminRetentionPurgeDeletesAtMostLimit() throws Exception {
+        oldItem("retention-limit-1", "succeeded");
+        oldItem("retention-limit-2", "succeeded");
+        oldItem("retention-limit-3", "succeeded");
+
+        ResponseEntity<Map> purge = post("/admin/queues/" + QUEUE + "/retention/purge",
+            Map.of("olderThan", "2999-01-01T00:00:00Z", "statuses", List.of("succeeded"), "dryRun", false, "reason", "cleanup", "limit", 2),
+            Map.class,
+            adminHeaders());
+
+        assertEquals(HttpStatus.OK, purge.getStatusCode());
+        assertEquals(2, ((Number) purge.getBody().get("matched")).intValue());
+        assertEquals(2, ((Number) purge.getBody().get("deleted")).intValue());
+        assertEquals(1, countWhere("queue_item", "status = 'succeeded'"));
+    }
+
+    @Test
     void adminRetentionPurgeDeletesOnlyEligibleTerminalRowsAndWritesAudit() throws Exception {
         oldItem("retention-succeeded", "succeeded");
         oldItem("retention-cancelled", "cancelled");
@@ -227,6 +244,17 @@ class QueueApiIntegrationTest {
     }
 
     @Test
+    void adminRetentionRejectsZeroLimit() {
+        ResponseEntity<Map> purge = post("/admin/queues/" + QUEUE + "/retention/purge",
+            Map.of("olderThan", "2999-01-01T00:00:00Z", "statuses", List.of("succeeded"), "dryRun", false, "reason", "bad", "limit", 0),
+            Map.class,
+            adminHeaders());
+
+        assertEquals(HttpStatus.BAD_REQUEST, purge.getStatusCode());
+        assertEquals("VALIDATION_ERROR", purge.getBody().get("errorCode"));
+    }
+
+    @Test
     void lifecycleOperationsDoNotWriteAdminAudit() throws Exception {
         UUID itemId = UUID.fromString((String) enqueue("audit-complete", 5).getBody().get("itemId"));
         Map<String, Object> completeClaim = claim("worker-complete").getBody();
@@ -253,8 +281,8 @@ class QueueApiIntegrationTest {
         assertEquals(true, details.get("queueItemTablePresent"));
         assertEquals(true, details.get("queueSourceStateTablePresent"));
         assertEquals(true, details.get("adminAuditTablePresent"));
-        assertEquals("3", details.get("schemaVersion"));
-        assertEquals("3", details.get("requiredSchemaVersion"));
+        assertEquals("4", details.get("schemaVersion"));
+        assertEquals("4", details.get("requiredSchemaVersion"));
         assertEquals(true, details.get("schemaCurrent"));
         assertEquals(true, details.get("recoveryEnabled"));
     }

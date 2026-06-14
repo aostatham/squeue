@@ -12,12 +12,12 @@ import org.springframework.boot.actuate.health.Status;
 class QueueHealthIndicatorTest {
     @Test
     void healthIsUpWhenSchemaIsCurrent() throws Exception {
-        QueueHealthIndicator indicator = indicator("3");
+        QueueHealthIndicator indicator = indicator(QueueSchemaInfo.REQUIRED_SCHEMA_VERSION);
 
         var health = indicator.health();
 
         assertEquals(Status.UP, health.getStatus());
-        assertEquals("3", health.getDetails().get("schemaVersion"));
+        assertEquals(QueueSchemaInfo.REQUIRED_SCHEMA_VERSION, health.getDetails().get("schemaVersion"));
         assertEquals(QueueSchemaInfo.REQUIRED_SCHEMA_VERSION, health.getDetails().get("requiredSchemaVersion"));
         assertEquals(true, health.getDetails().get("schemaCurrent"));
     }
@@ -36,7 +36,7 @@ class QueueHealthIndicatorTest {
 
     @Test
     void healthIsOutOfServiceWhenQueueItemTableIsMissing() throws Exception {
-        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo("3", false, true, true), true);
+        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo(QueueSchemaInfo.REQUIRED_SCHEMA_VERSION, false, true, true), true);
 
         var health = indicator.health();
 

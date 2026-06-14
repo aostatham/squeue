@@ -141,10 +141,10 @@ class SequencedQueueDirectClientTest {
             .build());
         ClaimResponse claim = client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 60, 1));
 
-        QueueConflictException error = assertThrows(QueueConflictException.class, () ->
+        LeaseLostException error = assertThrows(LeaseLostException.class, () ->
             client.complete("wf.commands", claim.items().getFirst().itemId(), new CompleteRequest("worker-1", java.util.UUID.randomUUID(), Map.of())));
 
-        assertEquals(QueueConflictException.class, error.getClass());
+        assertEquals(LeaseLostException.class, error.getClass());
     }
 
     @Test
@@ -159,8 +159,37 @@ class SequencedQueueDirectClientTest {
         execute("UPDATE queue_item SET lease_until = now() - interval '1 second'");
         execute("UPDATE queue_source_state SET lease_until = now() - interval '1 second'");
 
-        assertThrows(QueueConflictException.class, () ->
+        assertThrows(LeaseLostException.class, () ->
             client.heartbeat("wf.commands", claim.leaseId(), new HeartbeatRequest("worker-1", 60)));
+    }
+
+    @Test
+    void directExceptionMappingUsesCoreErrorCodes() {
+        assertThrows(InvalidQueueRequestException.class, () ->
+            client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 0, 1)));
+
+        assertThrows(ItemNotFoundException.class, () ->
+            client.complete("wf.commands", java.util.UUID.randomUUID(), new CompleteRequest("worker-1", java.util.UUID.randomUUID(), Map.of())));
+
+        EnqueueResponse pending = client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-not-claimed")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        assertThrows(ItemNotClaimedException.class, () ->
+            client.complete("wf.commands", pending.itemId(), new CompleteRequest("worker-1", java.util.UUID.randomUUID(), Map.of())));
+
+        client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-conflict")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        ClaimResponse claim = client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 60, 1));
+        assertThrows(QueueConflictException.class, () -> client.skip("wf.commands", claim.items().getFirst().itemId()));
+
+        assertThrows(SourceBlockedException.class, () -> client.unblockSource("wf.commands", "inst-not-claimed"));
     }
 
     @Test
@@ -190,7 +219,7 @@ class SequencedQueueDirectClientTest {
 
     @Test
     void directClientReadsFlywaySchemaVersion() {
-        assertEquals("3", client.getSchemaInfo().schemaVersion());
+        assertEquals("4", client.getSchemaInfo().schemaVersion());
     }
 
     @Test

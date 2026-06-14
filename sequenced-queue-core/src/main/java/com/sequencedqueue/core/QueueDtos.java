@@ -48,7 +48,10 @@ public final class QueueDtos {
     public record AdminAuditResponse(UUID auditId, OffsetDateTime occurredAt, String actorId, String operation, String queueName, String sourceId, UUID itemId, String previousStatus, String newStatus, String reason, Map<String, Object> metadata) {
     }
 
-    public record RetentionPurgeRequest(OffsetDateTime olderThan, List<String> statuses, Boolean dryRun, String reason) {
+    public record RetentionPurgeRequest(OffsetDateTime olderThan, List<String> statuses, Boolean dryRun, String reason, Integer limit) {
+        public RetentionPurgeRequest(OffsetDateTime olderThan, List<String> statuses, Boolean dryRun, String reason) {
+            this(olderThan, statuses, dryRun, reason, null);
+        }
     }
 
     public record RetentionPurgeResponse(String queueName, boolean dryRun, long matched, long deleted) {

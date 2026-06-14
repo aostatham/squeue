@@ -146,7 +146,7 @@ public class SequencedQueueDirectClient {
         try {
             QueueDtos.RetentionPurgeRequest coreRequest = request == null
                 ? null
-                : new QueueDtos.RetentionPurgeRequest(request.olderThan(), request.statuses(), request.dryRun(), request.reason());
+                : new QueueDtos.RetentionPurgeRequest(request.olderThan(), request.statuses(), request.dryRun(), request.reason(), request.limit());
             QueueDtos.RetentionPurgeResponse response = queueOperations.purgeRetention(queueName,
                 coreRequest);
             return new RetentionPurgeResponse(response.queueName(), response.dryRun(), response.matched(), response.deleted());
@@ -199,16 +199,16 @@ public class SequencedQueueDirectClient {
     }
 
     private QueueException mapCoreException(com.sequencedqueue.core.QueueException e) {
-        if (e.statusCode() == com.sequencedqueue.core.QueueException.BAD_REQUEST) {
-            return new InvalidQueueRequestException(e.getMessage());
-        }
-        if (e.statusCode() == com.sequencedqueue.core.QueueException.CONFLICT) {
-            return new QueueConflictException(e.getMessage(), e);
-        }
-        if (e.statusCode() == com.sequencedqueue.core.QueueException.NOT_FOUND) {
-            return new ItemNotFoundException(e.getMessage());
-        }
-        return new QueueUnavailableException(e.getMessage(), e);
+        return switch (e.errorCode()) {
+            case VALIDATION_ERROR -> new InvalidQueueRequestException(e.getMessage());
+            case ITEM_NOT_FOUND, SOURCE_NOT_FOUND -> new ItemNotFoundException(e.getMessage());
+            case LEASE_LOST, LEASE_EXPIRED -> new LeaseLostException(e.getMessage());
+            case ITEM_NOT_PROCESSING -> new ItemNotClaimedException(e.getMessage());
+            case SOURCE_BLOCKED -> new SourceBlockedException(e.getMessage());
+            case IDEMPOTENCY_CONFLICT -> new DuplicateIdempotencyKeyException(e.getMessage(), e);
+            case QUEUE_CONFLICT -> new QueueConflictException(e.getMessage(), e);
+            case INTERNAL_ERROR -> new QueueUnavailableException(e.getMessage(), e);
+        };
     }
 
     private ClaimResponse toDirect(QueueDtos.ClaimResponse response) {

@@ -71,6 +71,18 @@ Run the required PostgreSQL contract suite with Docker-backed Testcontainers:
 ./mvnw verify -Ppostgres-contract
 ```
 
+Run developer-facing examples/OpenAPI/client contracts:
+
+```sh
+./mvnw verify -Pdeveloper-contract
+```
+
+Run both contract sets:
+
+```sh
+./mvnw verify -Pfull-contract
+```
+
 Run Python client tests:
 
 ```sh
@@ -102,7 +114,7 @@ Retryable failures become `retry_wait` until attempts are exhausted. Exhausted r
 
 Successful admin repair operations are written to `queue_admin_audit`. See [docs/semantics.md](docs/semantics.md) for canonical retry, lease, recovery, and admin repair detail.
 
-Manual retention purge is available through the admin API. It deletes only old passable terminal rows (`succeeded`, `cancelled`, `skipped`, `failed`) and never purges `pending`, `processing`, `retry_wait`, or `dead_lettered`.
+Manual retention purge is available through the admin API. It deletes only old passable terminal rows (`succeeded`, `cancelled`, `skipped`, `failed`) and never purges `pending`, `processing`, `retry_wait`, or `dead_lettered`. Purge requests are bounded by `limit`, defaulting to `1000` and capped by `sequenced-queue.max-retention-purge-batch-size`.
 
 ## REST API and Security
 
@@ -122,6 +134,7 @@ sequenced-queue.max-payload-bytes=262144
 sequenced-queue.max-headers-bytes=65536
 sequenced-queue.max-error-message-bytes=8192
 sequenced-queue.max-admin-reason-bytes=2048
+sequenced-queue.max-retention-purge-batch-size=10000
 ```
 
 These limits are enforced in `sequenced-queue-core`, not only by REST controllers.
@@ -189,7 +202,7 @@ List endpoints support `limit` and `offset`.
 
 The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
 
-The database must already have the `sequenced-queue-core` Flyway migrations applied. The current direct Java client requires schema version `3`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
+The database must already have the `sequenced-queue-core` Flyway migrations applied. The current direct Java client requires schema version `4`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
 
 Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, manual retention purge, idempotency handling, per-source sequence assignment, and schema version lookup.
 
