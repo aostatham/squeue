@@ -20,7 +20,7 @@ Project status:
 Stage 0 - Correctness Foundation: passed
 Stage 1 - Operational Readiness Baseline: passed
 Stage 2 - Developer Experience Baseline: passed
-Current focus - Simplification / Stage 3A Minimal Production Hardening
+Current focus - v0.1.0-rc1 release readiness
 ```
 
 ## Modules
@@ -36,6 +36,8 @@ Current focus - Simplification / Stage 3A Minimal Production Hardening
 ## Documentation
 
 - [Developer Quickstart](docs/developer_quickstart.md)
+- [Changelog](CHANGELOG.md)
+- [Release Checklist](RELEASE_CHECKLIST.md)
 - [Canonical Semantics](docs/semantics.md)
 - [Simplification Strategy](docs/simplification_strategy.md)
 - [Security and Database Privileges](docs/security.md)
@@ -91,6 +93,28 @@ python -m pytest
 ```
 
 For a runnable producer/worker walkthrough, see [Developer Quickstart](docs/developer_quickstart.md).
+
+## Docker Image
+
+Build the server image from the repository root:
+
+```sh
+docker build -f sequenced-queue-server/Dockerfile -t sequenced-queue-server:0.1.0-rc1 .
+```
+
+Run it against an existing PostgreSQL database:
+
+```sh
+docker run --rm -p 8080:8080 \
+  -e SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/sequenced_queue \
+  -e SPRING_DATASOURCE_USERNAME=sequenced_queue \
+  -e SPRING_DATASOURCE_PASSWORD=sequenced_queue \
+  -e SEQUENCED_QUEUE_API_KEY=replace-worker-key \
+  -e SEQUENCED_QUEUE_ADMIN_API_KEY=replace-admin-key \
+  sequenced-queue-server:0.1.0-rc1
+```
+
+The server also supports the local development aliases `DATABASE_URL`, `DATABASE_USERNAME`, and `DATABASE_PASSWORD` through `application.yml`; the `SPRING_DATASOURCE_*` names are the standard Spring Boot overrides.
 
 ## Delivery Semantics
 

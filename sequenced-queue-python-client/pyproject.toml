@@ -4,10 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sequenced-queue"
-version = "0.1.0"
-description = "HTTP client for sequenced-queue"
+version = "0.1.0rc1"
+description = "Python REST client and worker helper for sequenced-queue"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["requests>=2.31"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

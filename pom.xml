@@ -5,8 +5,10 @@
 
   <groupId>com.example</groupId>
   <artifactId>sequenced-queue</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.0-rc1</version>
   <packaging>pom</packaging>
+  <name>sequenced-queue</name>
+  <description>PostgreSQL-backed durable queue with strict per-source ordering and REST, Java, Python, and trusted direct Java access paths.</description>
 
   <modules>
     <module>sequenced-queue-core</module>

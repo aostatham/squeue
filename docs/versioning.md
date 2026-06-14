@@ -1,10 +1,34 @@
 # Versioning and Schema Compatibility
 
+The intended release candidate is `0.1.0-rc1`.
+
 The current queue schema version is `4`.
 
 The REST server and trusted direct Java client read Flyway schema history through `sequenced-queue-core`.
 
 The direct Java client requires schema version `4`. When `validateSchemaOnBuild(true)` is enabled, the direct client builder fails fast if the current schema version is missing or incompatible.
+
+## Artifacts
+
+Maven artifacts currently use groupId `com.example` and version `0.1.0-rc1`.
+
+| Module path | Maven artifactId | Notes |
+| --- | --- | --- |
+| `sequenced-queue-core` | `sequenced-queue-core` | Shared queue implementation, production SQL, Flyway migrations, and schema compatibility checks. |
+| `sequenced-queue-server` | `sequenced-queue-server` | Spring Boot REST API and operational adapter. |
+| `sequenced-queue-java-client` | `sequenced-queue-java-client` | Java REST client and worker helper. |
+| `clients/java-direct` | `sequenced-queue-java-direct-client` | Trusted direct Java/PostgreSQL client backed by `sequenced-queue-core`. |
+| `examples/java-producer` | `sequenced-queue-example-java-producer` | Runnable Java REST producer example. |
+| `examples/java-rest-worker` | `sequenced-queue-example-java-rest-worker` | Runnable Java REST worker example. |
+| `examples/java-direct-worker` | `sequenced-queue-example-java-direct-worker` | Runnable trusted direct Java/PostgreSQL worker example. |
+
+The Python package lives in `sequenced-queue-python-client`, uses package name `sequenced-queue`, and uses PEP 440 version `0.1.0rc1` for this release candidate.
+
+The Maven groupId, license, SCM URL, project URL, developer, and organization metadata should be finalized before any public artifact publication. They are intentionally not filled with placeholder public URLs.
+
+The Docker image tag used in local documentation is `sequenced-queue-server:0.1.0-rc1`.
+
+## Schema Compatibility
 
 Migration policy:
 

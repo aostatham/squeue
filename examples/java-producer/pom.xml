@@ -6,11 +6,13 @@
   <parent>
     <groupId>com.example</groupId>
     <artifactId>sequenced-queue</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0-rc1</version>
     <relativePath>../../pom.xml</relativePath>
   </parent>
 
   <artifactId>sequenced-queue-example-java-producer</artifactId>
+  <name>sequenced-queue-example-java-producer</name>
+  <description>Runnable Java REST producer example for sequenced-queue.</description>
 
   <dependencies>
     <dependency>

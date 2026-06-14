@@ -6,11 +6,13 @@
   <parent>
     <groupId>com.example</groupId>
     <artifactId>sequenced-queue</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0-rc1</version>
     <relativePath>../../pom.xml</relativePath>
   </parent>
 
   <artifactId>sequenced-queue-java-direct-client</artifactId>
+  <name>sequenced-queue-java-direct-client</name>
+  <description>Trusted direct Java PostgreSQL client backed by sequenced-queue-core.</description>
 
   <dependencies>
     <dependency>
