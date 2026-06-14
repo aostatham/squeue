@@ -2,6 +2,10 @@
 
 `sequenced-queue` is a lightweight PostgreSQL-backed durable work queue with strict per-source ordering and REST, Java, Python, and trusted direct Java/PostgreSQL access paths.
 
+The core product is the Core Runtime.
+The Full Distribution adds optional clients/examples/docs.
+Both use the same core semantics.
+
 Invariant:
 
 ```text
