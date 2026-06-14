@@ -197,6 +197,22 @@ API keys are configured through application configuration only. There is a WORKE
 
 The queue database does not store API keys. Full key lifecycle management, hashed key storage, OAuth/OIDC, and identity-provider integration are deferred until there is a concrete deployment requirement.
 
+## SQ-028 - Keep Request Limits Global and Core-Enforced
+
+Status: Accepted.
+
+Request limits are global settings and are enforced in `sequenced-queue-core`.
+
+There is no `queue_config` table, per-queue override model, or database-backed queue policy.
+
+## SQ-029 - Use Safe Structured Queue Logs
+
+Status: Accepted.
+
+Queue logs may include identifiers, item type, status, operation, worker ID, result, error code, and retention purge counts.
+
+Queue logs must not include payload JSON, headers JSON, API key values, idempotency keys, raw SQL details, or stack traces for expected validation/conflict cases.
+
 ## Resolved Former Undecided Items
 
 The following earlier undecided items are resolved:
@@ -207,6 +223,7 @@ The following earlier undecided items are resolved:
 - Queue-level policies: deferred; configuration remains global-only for now.
 - Retention: manual passable-terminal purge only.
 - API keys: config-only worker/admin keys.
+- Request limits: global-only and core-enforced.
 
 ## Deferred Decisions
 

@@ -298,6 +298,77 @@ class QueueApiIntegrationTest {
     }
 
     @Test
+    void payloadOverLimitReturnsStructuredSafeValidationError() {
+        String secretPayload = "secret-payload-" + "x".repeat(270_000);
+
+        ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items",
+            Map.of("sourceId", "limit-payload", "itemType", "type", "payload", Map.of("secret", secretPayload), "headers", Map.of()),
+            Map.class);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
+        assertEquals("payload exceeds max bytes", response.getBody().get("message"));
+        assertFalse(response.getBody().toString().contains(secretPayload));
+        assertFalse(response.getBody().toString().contains("Authorization"));
+    }
+
+    @Test
+    void headersOverLimitReturnsStructuredSafeValidationError() {
+        String secretHeader = "secret-header-" + "x".repeat(70_000);
+
+        ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items",
+            Map.of("sourceId", "limit-headers", "itemType", "type", "payload", Map.of(), "headers", Map.of("secret", secretHeader)),
+            Map.class);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
+        assertEquals("headers exceeds max bytes", response.getBody().get("message"));
+        assertFalse(response.getBody().toString().contains(secretHeader));
+    }
+
+    @Test
+    void failErrorMessageOverLimitReturnsStructuredValidationError() {
+        UUID itemId = UUID.fromString((String) enqueue("limit-error-message", 5).getBody().get("itemId"));
+        Map<String, Object> claim = claim("worker-1").getBody();
+        String secretError = "secret-error-" + "x".repeat(9_000);
+
+        ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items/" + itemId + "/fail",
+            Map.of("workerId", "worker-1", "leaseId", claim.get("leaseId"), "retryable", false, "errorType", "ERR", "errorMessage", secretError),
+            Map.class);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
+        assertEquals("errorMessage exceeds max bytes", response.getBody().get("message"));
+        assertFalse(response.getBody().toString().contains(secretError));
+    }
+
+    @Test
+    void retentionReasonOverLimitReturnsStructuredValidationError() {
+        String secretReason = "secret-reason-" + "x".repeat(3_000);
+
+        ResponseEntity<Map> response = post("/admin/queues/" + QUEUE + "/retention/purge",
+            Map.of("olderThan", "2999-01-01T00:00:00Z", "statuses", List.of("succeeded"), "dryRun", false, "reason", secretReason),
+            Map.class,
+            adminHeaders());
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
+        assertEquals("admin reason exceeds max bytes", response.getBody().get("message"));
+        assertFalse(response.getBody().toString().contains(secretReason));
+    }
+
+    @Test
+    void claimLeaseSecondsOverMaxReturnsStructuredValidationError() {
+        ResponseEntity<Map> response = post("/queues/" + QUEUE + "/claims",
+            Map.of("workerId", "worker-1", "supportedItemTypes", List.of("type"), "leaseSeconds", 601, "maxItems", 1),
+            Map.class);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
+        assertEquals("leaseSeconds must be <= 600", response.getBody().get("message"));
+    }
+
+    @Test
     void blockedSourceErrorResponseIncludesContext() {
         UUID itemId = UUID.fromString((String) enqueue("blocked-source", 1).getBody().get("itemId"));
         Map<String, Object> claim = claim("worker-1").getBody();

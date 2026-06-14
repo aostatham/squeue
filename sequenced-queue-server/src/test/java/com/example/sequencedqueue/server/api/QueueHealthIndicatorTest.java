@@ -34,11 +34,56 @@ class QueueHealthIndicatorTest {
         assertEquals(false, health.getDetails().get("schemaCurrent"));
     }
 
+    @Test
+    void healthIsOutOfServiceWhenQueueItemTableIsMissing() throws Exception {
+        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo("3", false, true, true), true);
+
+        var health = indicator.health();
+
+        assertEquals(Status.OUT_OF_SERVICE, health.getStatus());
+        assertEquals(false, health.getDetails().get("queueItemTablePresent"));
+    }
+
+    @Test
+    void healthIsOutOfServiceWhenAdminAuditTableIsMissing() throws Exception {
+        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo("3", true, true, false), true);
+
+        var health = indicator.health();
+
+        assertEquals(Status.OUT_OF_SERVICE, health.getStatus());
+        assertEquals(false, health.getDetails().get("adminAuditTablePresent"));
+    }
+
+    @Test
+    void healthIsOutOfServiceWhenSchemaVersionIsMissing() throws Exception {
+        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo(null, true, true, true), true);
+
+        var health = indicator.health();
+
+        assertEquals(Status.OUT_OF_SERVICE, health.getStatus());
+        assertEquals(null, health.getDetails().get("schemaVersion"));
+        assertEquals(false, health.getDetails().get("schemaCurrent"));
+    }
+
+    @Test
+    void healthReportsRecoveryDisabledAsOutOfService() throws Exception {
+        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo("3", true, true, true), false);
+
+        var health = indicator.health();
+
+        assertEquals(Status.OUT_OF_SERVICE, health.getStatus());
+        assertEquals(false, health.getDetails().get("recoveryEnabled"));
+    }
+
     private static QueueHealthIndicator indicator(String schemaVersion) throws Exception {
+        return indicator(new QueueSchemaInfo(schemaVersion, true, true, true), true);
+    }
+
+    private static QueueHealthIndicator indicator(QueueSchemaInfo schemaInfo, boolean recoveryEnabled) throws Exception {
         QueueOperations operations = mock(QueueOperations.class);
 
-        when(operations.getSchemaInfo()).thenReturn(new QueueSchemaInfo(schemaVersion, true, true, true));
+        when(operations.getSchemaInfo()).thenReturn(schemaInfo);
 
-        return new QueueHealthIndicator(operations, true);
+        return new QueueHealthIndicator(operations, recoveryEnabled);
     }
 }

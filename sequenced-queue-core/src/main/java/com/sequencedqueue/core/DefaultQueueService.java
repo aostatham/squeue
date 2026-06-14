@@ -5,6 +5,7 @@ import static com.sequencedqueue.core.QueueDtos.*;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -29,17 +30,27 @@ public class DefaultQueueService implements QueueOperations {
     private final RetryPolicy retryPolicy;
     private final ObjectMapper objectMapper;
     private final Clock clock;
-    private final int defaultLeaseSeconds;
-    private final int defaultMaxAttempts;
+    private final QueueSettings settings;
 
     public DefaultQueueService(QueueRepository repository, TransactionRunner transactions, RetryPolicy retryPolicy, ObjectMapper objectMapper, Clock clock, int defaultLeaseSeconds, int defaultMaxAttempts) {
+        this(repository, transactions, retryPolicy, objectMapper, clock, new QueueSettings(
+            defaultLeaseSeconds,
+            QueueSettings.defaults().maxLeaseSeconds(),
+            defaultMaxAttempts,
+            QueueSettings.defaults().maxPayloadBytes(),
+            QueueSettings.defaults().maxHeadersBytes(),
+            QueueSettings.defaults().maxErrorMessageBytes(),
+            QueueSettings.defaults().maxAdminReasonBytes()
+        ));
+    }
+
+    public DefaultQueueService(QueueRepository repository, TransactionRunner transactions, RetryPolicy retryPolicy, ObjectMapper objectMapper, Clock clock, QueueSettings settings) {
         this.repository = repository;
         this.transactions = transactions;
         this.retryPolicy = retryPolicy;
         this.objectMapper = objectMapper;
         this.clock = clock;
-        this.defaultLeaseSeconds = defaultLeaseSeconds;
-        this.defaultMaxAttempts = defaultMaxAttempts;
+        this.settings = settings;
     }
 
     @Override
@@ -85,7 +96,7 @@ public class DefaultQueueService implements QueueOperations {
         requireRequest(request);
         transactions.inTransaction(() -> {
             requireText(request.workerId(), "workerId");
-            int extendBy = request.extendBySeconds() == null ? defaultLeaseSeconds : request.extendBySeconds();
+            int extendBy = request.extendBySeconds() == null ? settings.defaultLeaseSeconds() : request.extendBySeconds();
             if (extendBy <= 0) {
                 throw new QueueException(QueueException.BAD_REQUEST, "extendBySeconds must be > 0");
             }
@@ -130,6 +141,7 @@ public class DefaultQueueService implements QueueOperations {
 
     @Override
     public SourceResponse unblockSource(String queueName, String sourceId, String actorId, String reason) {
+        validateAdminReason(reason, queueName);
         return transactions.inTransaction(() -> {
             OffsetDateTime now = now();
             SourceStateRow source = repository.lockSource(queueName, sourceId);
@@ -186,6 +198,7 @@ public class DefaultQueueService implements QueueOperations {
     public RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request, String actorId) {
         requireRequest(request);
         requireText(queueName, "queueName");
+        validateAdminReason(request.reason(), queueName);
         if (request.olderThan() == null) {
             throw new QueueException(QueueException.BAD_REQUEST, "olderThan is required").withQueueName(queueName);
         }
@@ -243,6 +256,10 @@ public class DefaultQueueService implements QueueOperations {
         if (request.maxAttempts() != null && request.maxAttempts() < 1) {
             throw new QueueException(QueueException.BAD_REQUEST, "maxAttempts must be >= 1");
         }
+        String payloadJson = writeJson(defaultMap(request.payload()));
+        String headersJson = writeJson(defaultMap(request.headers()));
+        requireMaxBytes(payloadJson, settings.maxPayloadBytes(), "payload", queueName);
+        requireMaxBytes(headersJson, settings.maxHeadersBytes(), "headers", queueName);
 
         var existing = repository.findByIdempotencyKey(queueName, request.idempotencyKey());
         if (existing.isPresent()) {
@@ -259,7 +276,7 @@ public class DefaultQueueService implements QueueOperations {
         long sequenceNo = source.nextSequenceNo();
         repository.incrementNextSequence(queueName, request.sourceId(), now);
 
-        QueueItemRow item = repository.insertItem(UUID.randomUUID(), queueName, request.sourceId(), sequenceNo, request.itemType(), writeJson(defaultMap(request.payload())), writeJson(defaultMap(request.headers())), request.availableAt() == null ? now : request.availableAt(), request.maxAttempts() == null ? defaultMaxAttempts : request.maxAttempts(), blankToNull(request.idempotencyKey()), now);
+        QueueItemRow item = repository.insertItem(UUID.randomUUID(), queueName, request.sourceId(), sequenceNo, request.itemType(), payloadJson, headersJson, request.availableAt() == null ? now : request.availableAt(), request.maxAttempts() == null ? settings.defaultMaxAttempts() : request.maxAttempts(), blankToNull(request.idempotencyKey()), now);
         return toEnqueueResponse(item);
     }
 
@@ -272,9 +289,12 @@ public class DefaultQueueService implements QueueOperations {
         if (request.maxItems() != null && request.maxItems() > 1) {
             throw new QueueException(QueueException.BAD_REQUEST, "MVP supports maxItems <= 1");
         }
-        int leaseSeconds = request.leaseSeconds() == null ? defaultLeaseSeconds : request.leaseSeconds();
+        int leaseSeconds = request.leaseSeconds() == null ? settings.defaultLeaseSeconds() : request.leaseSeconds();
         if (leaseSeconds <= 0) {
             throw new QueueException(QueueException.BAD_REQUEST, "leaseSeconds must be > 0");
+        }
+        if (leaseSeconds > settings.maxLeaseSeconds()) {
+            throw new QueueException(QueueException.BAD_REQUEST, "leaseSeconds must be <= " + settings.maxLeaseSeconds()).withQueueName(queueName);
         }
 
         repository.blockDeadLetteredHeadSources(queueName, now());
@@ -289,6 +309,7 @@ public class DefaultQueueService implements QueueOperations {
         if (request.backoffSeconds() != null && request.backoffSeconds() < 0) {
             throw new QueueException(QueueException.BAD_REQUEST, "backoffSeconds must be >= 0");
         }
+        requireMaxBytes(request.errorMessage(), settings.maxErrorMessageBytes(), "errorMessage", queueName);
         QueueItemRow item = verifyLease(queueName, itemId, request.workerId(), request.leaseId());
         OffsetDateTime now = now();
         boolean exhausted = item.attemptCount() >= item.maxAttempts();
@@ -342,6 +363,7 @@ public class DefaultQueueService implements QueueOperations {
     }
 
     private ItemResponse adminRepair(String queueName, UUID itemId, ItemStatus targetStatus, List<ItemStatus> allowedStatuses, String operation, String actorId, String reason) {
+        validateAdminReason(reason, queueName);
         QueueItemRow candidate = repository.findItem(queueName, itemId)
             .orElseThrow(() -> new QueueException(QueueException.NOT_FOUND, "item not found").withContext(queueName, null, itemId));
         SourceStateRow source = repository.lockSource(candidate.queueName(), candidate.sourceId());
@@ -463,6 +485,16 @@ public class DefaultQueueService implements QueueOperations {
         if (request == null) {
             throw new QueueException(QueueException.BAD_REQUEST, "request body is required");
         }
+    }
+
+    private void requireMaxBytes(String value, int maxBytes, String field, String queueName) {
+        if (value != null && value.getBytes(StandardCharsets.UTF_8).length > maxBytes) {
+            throw new QueueException(QueueException.BAD_REQUEST, field + " exceeds max bytes").withQueueName(queueName);
+        }
+    }
+
+    private void validateAdminReason(String reason, String queueName) {
+        requireMaxBytes(reason, settings.maxAdminReasonBytes(), "admin reason", queueName);
     }
 
     private List<ItemStatus> retentionStatuses(List<String> requestedStatuses, String queueName) {

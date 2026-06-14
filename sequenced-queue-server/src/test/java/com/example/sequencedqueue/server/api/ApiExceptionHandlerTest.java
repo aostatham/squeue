@@ -21,4 +21,19 @@ class ApiExceptionHandlerTest {
         assertFalse(response.getBody().toString().contains("secret_table"));
         assertFalse(response.getBody().toString().contains("database query failed"));
     }
+
+    @Test
+    void validationErrorDoesNotLeakPayloadHeadersApiKeysOrSqlDetails() {
+        ApiExceptionHandler handler = new ApiExceptionHandler();
+
+        var response = handler.queueException(new QueueException(QueueException.BAD_REQUEST, "payload exceeds max bytes"));
+
+        assertEquals(400, response.getStatusCode().value());
+        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
+        assertEquals("payload exceeds max bytes", response.getBody().get("message"));
+        assertFalse(response.getBody().toString().contains("secret-payload-value"));
+        assertFalse(response.getBody().toString().contains("Authorization"));
+        assertFalse(response.getBody().toString().contains("Bearer"));
+        assertFalse(response.getBody().toString().contains("SELECT "));
+    }
 }

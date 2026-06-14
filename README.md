@@ -38,6 +38,8 @@ Current focus - Simplification / Stage 3A Minimal Production Hardening
 - [Developer Quickstart](docs/developer_quickstart.md)
 - [Canonical Semantics](docs/semantics.md)
 - [Simplification Strategy](docs/simplification_strategy.md)
+- [Security and Database Privileges](docs/security.md)
+- [Versioning and Schema Compatibility](docs/versioning.md)
 - [OpenAPI Contract](docs/openapi.yaml)
 - [Examples README](examples/README.md)
 - [Product Roadmap](docs/sequenced_queue_product_roadmap.md)
@@ -109,6 +111,20 @@ Worker endpoints live under `/queues/{queueName}` and require `Authorization: Be
 Admin endpoints live under `/admin/queues/{queueName}` and require `Authorization: Bearer <sequenced-queue.admin-api-key>`. The server fails startup if the worker and admin API keys are equal. This is a simple static/configured API key model; it is not OAuth/OIDC, full API-key lifecycle management, key rotation, hashed key storage, or production-grade identity management.
 
 Queue configuration is global-only. There is no `queue_config` table or queue-level database policy model.
+
+Global queue settings:
+
+```text
+sequenced-queue.default-lease-seconds=60
+sequenced-queue.max-lease-seconds=600
+sequenced-queue.default-max-attempts=5
+sequenced-queue.max-payload-bytes=262144
+sequenced-queue.max-headers-bytes=65536
+sequenced-queue.max-error-message-bytes=8192
+sequenced-queue.max-admin-reason-bytes=2048
+```
+
+These limits are enforced in `sequenced-queue-core`, not only by REST controllers.
 
 REST errors use a stable shape:
 

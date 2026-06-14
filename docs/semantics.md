@@ -147,9 +147,39 @@ Ineligible statuses:
 
 Queue configuration is global-only. There is no `queue_config` table and no queue-level database policy model.
 
-Implemented global settings include default lease seconds, default max attempts, recovery enablement, and recovery cadence. Additional global limits may be added without changing queue semantics, but per-queue configuration is deferred.
+Implemented global settings include default lease seconds, maximum lease seconds, default max attempts, request field limits, recovery enablement, and recovery cadence. Per-queue configuration is deferred.
 
 API key management is config-only. The server supports a WORKER key for `/queues/**` and an ADMIN key for `/admin/**`; the ADMIN key can also call worker endpoints. Keys are not stored in the queue database, and OAuth/OIDC and full key lifecycle management are out of scope.
+
+Current global request limits:
+
+- `defaultLeaseSeconds`
+- `maxLeaseSeconds`
+- `defaultMaxAttempts`
+- `maxPayloadBytes`
+- `maxHeadersBytes`
+- `maxErrorMessageBytes`
+- `maxAdminReasonBytes`
+
+These are enforced in `sequenced-queue-core`.
+
+## Structured Logging Policy
+
+Queue/server logs use safe event fields only:
+
+- `queueName`
+- `sourceId`
+- `itemId`
+- `sequenceNo`
+- `itemType`
+- `workerId`
+- `operation`
+- `status`
+- `result`
+- `errorCode`
+- retention `matched` and `deleted` counts
+
+Logs must not include payload JSON, headers JSON, API key values, idempotency key values, raw SQL details, or full stack traces for expected validation/conflict paths.
 
 ## REST and Direct Java Access
 

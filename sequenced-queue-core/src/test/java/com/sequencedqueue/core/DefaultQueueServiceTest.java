@@ -9,6 +9,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -162,6 +163,58 @@ class DefaultQueueServiceTest {
     }
 
     @Test
+    void payloadWithinLimitIsAcceptedAndOmittedMaxAttemptsUsesDefault() {
+        FakeRepository repository = new FakeRepository();
+        DefaultQueueService service = service(repository, new QueueSettings(60, 120, 7, 32, 32, 32, 32));
+
+        EnqueueResponse response = service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of("x", "y"), Map.of(), null, null));
+
+        assertEquals(1, response.sequenceNo());
+        assertEquals(7, repository.lastInsertMaxAttempts);
+    }
+
+    @Test
+    void enqueueRejectsPayloadOverLimit() {
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 8, 32, 32, 32));
+
+        assertBadRequest(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of("tooLarge", "value"), Map.of(), null, null)));
+    }
+
+    @Test
+    void enqueueRejectsHeadersOverLimit() {
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 8, 32, 32));
+
+        assertBadRequest(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of(), Map.of("tooLarge", "value"), null, null)));
+    }
+
+    @Test
+    void failRejectsErrorMessageOverLimit() {
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 4, 32));
+
+        assertBadRequest(() -> service.fail("q", UUID.randomUUID(), new FailRequest("worker-1", UUID.randomUUID(), false, "ERR", "12345", null)));
+    }
+
+    @Test
+    void claimRejectsLeaseSecondsOverMax() {
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 32, 32));
+
+        assertBadRequest(() -> service.claim("q", new ClaimRequest("worker-1", List.of("type"), 121, 1)));
+    }
+
+    @Test
+    void adminOperationsRejectReasonOverLimit() {
+        FakeRepository repository = new FakeRepository();
+        DefaultQueueService service = service(repository, new QueueSettings(60, 120, 5, 64, 64, 32, 4));
+        String reason = "12345";
+
+        assertBadRequest(() -> service.retry("q", repository.lockedItem.itemId(), "admin", reason));
+        assertBadRequest(() -> service.skip("q", repository.lockedItem.itemId(), "admin", reason));
+        assertBadRequest(() -> service.cancel("q", repository.lockedItem.itemId(), "admin", reason));
+        assertBadRequest(() -> service.unblockSource("q", "s", "admin", reason));
+        assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded"), false, reason), "admin"));
+    }
+
+    @Test
     void retentionPurgeRejectsBlockingStatuses() {
         DefaultQueueService service = service(new FakeRepository());
 
@@ -202,13 +255,17 @@ class DefaultQueueServiceTest {
     }
 
     private DefaultQueueService service(FakeRepository repository) {
+        return service(repository, QueueSettings.defaults());
+    }
+
+    private DefaultQueueService service(FakeRepository repository, QueueSettings settings) {
         TransactionRunner transactions = new TransactionRunner() {
             @Override
             public <T> T inTransaction(TransactionCallback<T> callback) {
                 return callback.execute();
             }
         };
-        return new DefaultQueueService(repository, transactions, new RetryPolicy(), new ObjectMapper(), Clock.fixed(now().toInstant(), ZoneOffset.UTC), 60, 5);
+        return new DefaultQueueService(repository, transactions, new RetryPolicy(), new ObjectMapper(), Clock.fixed(now().toInstant(), ZoneOffset.UTC), settings);
     }
 
     private static OffsetDateTime now() {
@@ -235,6 +292,7 @@ class DefaultQueueServiceTest {
         boolean duplicateOnInsert;
         int findByIdempotencyCalls;
         int insertAttempts;
+        int lastInsertMaxAttempts;
         int blockDeadLetteredHeadSourcesCalls;
         int releaseSourceCalls;
         int releaseSourceIfLeaseMatchesCalls;
@@ -267,6 +325,7 @@ class DefaultQueueServiceTest {
         @Override
         public QueueItemRow insertItem(UUID itemId, String queueName, String sourceId, long sequenceNo, String itemType, String payloadJson, String headersJson, OffsetDateTime availableAt, int maxAttempts, String idempotencyKey, OffsetDateTime now) {
             insertAttempts++;
+            lastInsertMaxAttempts = maxAttempts;
             if (duplicateOnInsert) {
                 throw new DuplicateIdempotencyKeyException("duplicate", null);
             }

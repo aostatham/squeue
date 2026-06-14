@@ -162,6 +162,7 @@ Stage 3A scope:
 - direct Java client remains thin over `sequenced-queue-core`
 - structured logging and migration discipline
 - manual retention purge only; no scheduler or archive table
+- global request limits and safe structured logging
 
 Explicitly deferred from Stage 3A:
 

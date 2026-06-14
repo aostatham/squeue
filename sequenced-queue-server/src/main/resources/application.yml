@@ -11,7 +11,12 @@ server:
   port: ${PORT:8080}
 sequenced-queue:
   default-lease-seconds: 60
+  max-lease-seconds: 600
   default-max-attempts: 5
+  max-payload-bytes: 262144
+  max-headers-bytes: 65536
+  max-error-message-bytes: 8192
+  max-admin-reason-bytes: 2048
   api-key: ${SEQUENCED_QUEUE_API_KEY:dev-key}
   admin-api-key: ${SEQUENCED_QUEUE_ADMIN_API_KEY:dev-admin-key}
   recovery-enabled: ${SEQUENCED_QUEUE_RECOVERY_ENABLED:true}

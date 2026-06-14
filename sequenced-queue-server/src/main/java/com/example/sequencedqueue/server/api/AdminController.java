@@ -81,7 +81,7 @@ public class AdminController {
     }
 
     @PostMapping("/retention/purge")
-    public RetentionPurgeResponse purgeRetention(@PathVariable("queueName") String queueName, @RequestBody RetentionPurgeRequest body, HttpServletRequest request) {
+    public com.sequencedqueue.core.QueueDtos.RetentionPurgeResponse purgeRetention(@PathVariable("queueName") String queueName, @RequestBody com.sequencedqueue.core.QueueDtos.RetentionPurgeRequest body, HttpServletRequest request) {
         return service.purgeRetention(queueName, body, actorId(request));
     }
 

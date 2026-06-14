@@ -186,6 +186,8 @@ SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
 
 The direct client delegates to `sequenced-queue-core`. It requires schema version `3`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema version is not `3`, the builder throws `QueueUnavailableException` and the client is not created.
 
+See [Versioning](versioning.md) for schema compatibility policy and [Security](security.md) for least-privilege database role guidance.
+
 For long-running direct workers, prefer the helper:
 
 ```java
