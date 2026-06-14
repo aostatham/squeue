@@ -1,52 +1,66 @@
 package com.sequencedqueue.direct;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
+import com.sequencedqueue.worker.QueueWorkerEngine;
+import com.sequencedqueue.worker.QueueWorkerEngine.Claim;
+import com.sequencedqueue.worker.QueueWorkerEngine.ClaimCommand;
+import com.sequencedqueue.worker.QueueWorkerEngine.CompleteCommand;
+import com.sequencedqueue.worker.QueueWorkerEngine.FailCommand;
+import com.sequencedqueue.worker.QueueWorkerEngine.HeartbeatCommand;
+
 public final class SequencedQueueDirectWorker implements AutoCloseable {
-    private final DirectWorkerTransport transport;
-    private final DirectWorkerLeaseMonitorFactory leaseMonitorFactory;
-    private final String queueName;
-    private final String workerId;
-    private final List<String> supportedItemTypes;
-    private final int leaseSeconds;
-    private final Map<String, Function<ClaimItem, DirectQueueResult>> handlers;
-    private volatile boolean running = true;
+    private final QueueWorkerEngine<ClaimItem, DirectQueueResult> engine;
 
     private SequencedQueueDirectWorker(Builder builder) {
-        this.transport = new ClientDirectWorkerTransport(builder.client);
-        this.leaseMonitorFactory = new ScheduledDirectWorkerLeaseMonitorFactory(builder.client);
-        this.queueName = builder.queueName;
-        this.workerId = builder.workerId;
-        this.supportedItemTypes = List.copyOf(builder.supportedItemTypes);
-        this.leaseSeconds = builder.leaseSeconds;
-        this.handlers = Map.copyOf(builder.handlers);
+        DirectWorkerTransport transport = new ClientDirectWorkerTransport(builder.client);
+        this.engine = engine(
+            transport,
+            QueueWorkerEngine.scheduledLeaseMonitorFactory(transport),
+            builder.queueName,
+            builder.workerId,
+            builder.supportedItemTypes,
+            builder.leaseSeconds,
+            builder.handlers
+        );
     }
 
     SequencedQueueDirectWorker(
         DirectWorkerTransport transport,
-        DirectWorkerLeaseMonitorFactory leaseMonitorFactory,
+        QueueWorkerEngine.LeaseMonitorFactory leaseMonitorFactory,
         String queueName,
         String workerId,
         List<String> supportedItemTypes,
         int leaseSeconds,
         Map<String, Function<ClaimItem, DirectQueueResult>> handlers
     ) {
-        this.transport = transport;
-        this.leaseMonitorFactory = leaseMonitorFactory;
-        this.queueName = queueName;
-        this.workerId = workerId;
-        this.supportedItemTypes = List.copyOf(supportedItemTypes);
-        this.leaseSeconds = leaseSeconds;
-        this.handlers = Map.copyOf(handlers);
+        this.engine = engine(transport, leaseMonitorFactory, queueName, workerId, supportedItemTypes, leaseSeconds, handlers);
+    }
+
+    private static QueueWorkerEngine<ClaimItem, DirectQueueResult> engine(
+        DirectWorkerTransport transport,
+        QueueWorkerEngine.LeaseMonitorFactory leaseMonitorFactory,
+        String queueName,
+        String workerId,
+        List<String> supportedItemTypes,
+        int leaseSeconds,
+        Map<String, Function<ClaimItem, DirectQueueResult>> handlers
+    ) {
+        return new QueueWorkerEngine<>(
+            transport,
+            leaseMonitorFactory,
+            new DirectItemView(),
+            new DirectResultView(),
+            queueName,
+            workerId,
+            supportedItemTypes,
+            leaseSeconds,
+            handlers
+        );
     }
 
     public static Builder builder(SequencedQueueDirectClient client, String queueName) {
@@ -54,74 +68,20 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
     }
 
     public void runForever() {
-        long emptySleepMillis = 100;
-        while (running && !Thread.currentThread().isInterrupted()) {
-            if (!runOnce()) {
-                sleep(emptySleepMillis);
-                emptySleepMillis = Math.min(5000, emptySleepMillis * 2);
-                continue;
-            }
-            emptySleepMillis = 100;
-        }
+        engine.runForever();
     }
 
     public boolean runOnce() {
-        ClaimResponse claim = transport.claim(queueName, new ClaimRequest(workerId, supportedItemTypes, leaseSeconds, 1));
-        if (claim.items() == null || claim.items().isEmpty()) {
-            return false;
-        }
-        handleClaim(claim);
-        return true;
+        return engine.runOnce();
     }
 
     public void stop() {
-        running = false;
+        engine.stop();
     }
 
     @Override
     public void close() {
         stop();
-    }
-
-    private void handleClaim(ClaimResponse claim) {
-        AtomicBoolean leaseLost = new AtomicBoolean(false);
-        DirectWorkerLeaseMonitor leaseMonitor = leaseMonitorFactory.start(queueName, claim.leaseId(), new HeartbeatRequest(workerId, leaseSeconds), leaseLost);
-        try {
-            ClaimItem item = claim.items().getFirst();
-            Function<ClaimItem, DirectQueueResult> handler = handlers.get(item.itemType());
-            if (handler == null) {
-                if (leaseLost.get()) {
-                    return;
-                }
-                transport.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), false, "NO_HANDLER", "No handler for " + item.itemType(), null));
-                return;
-            }
-            DirectQueueResult result = handler.apply(item);
-            if (leaseLost.get()) {
-                return;
-            }
-            if (result.succeeded()) {
-                transport.complete(queueName, item.itemId(), new CompleteRequest(workerId, claim.leaseId(), result.result()));
-            } else {
-                transport.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), result.retryable(), result.errorType(), result.errorMessage(), null));
-            }
-        } catch (Exception e) {
-            if (leaseLost.get()) {
-                return;
-            }
-            ClaimItem item = claim.items().getFirst();
-            transport.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), true, e.getClass().getSimpleName(), e.getMessage(), null));
-        } finally {
-            leaseMonitor.close();
-        }
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(Duration.ofMillis(millis));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 
     public static final class Builder {
@@ -170,21 +130,35 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
     }
 }
 
-interface DirectWorkerTransport {
+interface DirectWorkerTransport extends QueueWorkerEngine.Transport<ClaimItem>, QueueWorkerEngine.HeartbeatSender {
+    @Override
+    default Claim<ClaimItem> claim(String queueName, ClaimCommand command) {
+        ClaimResponse claim = claim(queueName, new ClaimRequest(command.workerId(), command.supportedItemTypes(), command.leaseSeconds(), command.maxItems()));
+        return new Claim<>(claim.leaseId(), claim.items());
+    }
+
     ClaimResponse claim(String queueName, ClaimRequest request);
+
+    @Override
+    default void heartbeat(String queueName, java.util.UUID leaseId, HeartbeatCommand command) {
+        heartbeat(queueName, leaseId, new HeartbeatRequest(command.workerId(), command.extendBySeconds()));
+    }
+
+    void heartbeat(String queueName, java.util.UUID leaseId, HeartbeatRequest request);
+
+    @Override
+    default void complete(String queueName, java.util.UUID itemId, CompleteCommand command) {
+        complete(queueName, itemId, new CompleteRequest(command.workerId(), command.leaseId(), command.result()));
+    }
 
     ItemResponse complete(String queueName, java.util.UUID itemId, CompleteRequest request);
 
-    ItemResponse fail(String queueName, java.util.UUID itemId, FailRequest request);
-}
-
-interface DirectWorkerLeaseMonitor extends AutoCloseable {
     @Override
-    void close();
-}
+    default void fail(String queueName, java.util.UUID itemId, FailCommand command) {
+        fail(queueName, itemId, new FailRequest(command.workerId(), command.leaseId(), command.retryable(), command.errorType(), command.errorMessage(), command.backoffSeconds()));
+    }
 
-interface DirectWorkerLeaseMonitorFactory {
-    DirectWorkerLeaseMonitor start(String queueName, java.util.UUID leaseId, HeartbeatRequest request, AtomicBoolean leaseLost);
+    ItemResponse fail(String queueName, java.util.UUID itemId, FailRequest request);
 }
 
 final class ClientDirectWorkerTransport implements DirectWorkerTransport {
@@ -200,6 +174,11 @@ final class ClientDirectWorkerTransport implements DirectWorkerTransport {
     }
 
     @Override
+    public void heartbeat(String queueName, java.util.UUID leaseId, HeartbeatRequest request) {
+        client.heartbeat(queueName, leaseId, request);
+    }
+
+    @Override
     public ItemResponse complete(String queueName, java.util.UUID itemId, CompleteRequest request) {
         return client.complete(queueName, itemId, request);
     }
@@ -210,30 +189,41 @@ final class ClientDirectWorkerTransport implements DirectWorkerTransport {
     }
 }
 
-final class ScheduledDirectWorkerLeaseMonitorFactory implements DirectWorkerLeaseMonitorFactory {
-    private final SequencedQueueDirectClient client;
-
-    ScheduledDirectWorkerLeaseMonitorFactory(SequencedQueueDirectClient client) {
-        this.client = client;
+final class DirectItemView implements QueueWorkerEngine.ItemView<ClaimItem> {
+    @Override
+    public java.util.UUID itemId(ClaimItem item) {
+        return item.itemId();
     }
 
     @Override
-    public DirectWorkerLeaseMonitor start(String queueName, java.util.UUID leaseId, HeartbeatRequest request, AtomicBoolean leaseLost) {
-        ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor();
-        int leaseSeconds = request.extendBySeconds() == null ? 60 : request.extendBySeconds();
-        heartbeats.scheduleAtFixedRate(
-            () -> {
-                try {
-                    client.heartbeat(queueName, leaseId, request);
-                } catch (RuntimeException e) {
-                    leaseLost.set(true);
-                    heartbeats.shutdown();
-                }
-            },
-            Math.max(1, leaseSeconds / 2),
-            Math.max(1, leaseSeconds / 2),
-            TimeUnit.SECONDS
-        );
-        return heartbeats::shutdownNow;
+    public String itemType(ClaimItem item) {
+        return item.itemType();
+    }
+}
+
+final class DirectResultView implements QueueWorkerEngine.ResultView<DirectQueueResult> {
+    @Override
+    public boolean succeeded(DirectQueueResult result) {
+        return result.succeeded();
+    }
+
+    @Override
+    public boolean retryable(DirectQueueResult result) {
+        return result.retryable();
+    }
+
+    @Override
+    public String errorType(DirectQueueResult result) {
+        return result.errorType();
+    }
+
+    @Override
+    public String errorMessage(DirectQueueResult result) {
+        return result.errorMessage();
+    }
+
+    @Override
+    public Map<String, Object> result(DirectQueueResult result) {
+        return result.result();
     }
 }

@@ -15,6 +15,7 @@ Maven artifacts currently use groupId `com.example` and version `0.1.0-rc1`.
 | Module path | Maven artifactId | Notes |
 | --- | --- | --- |
 | `sequenced-queue-core` | `sequenced-queue-core` | Shared queue implementation, production SQL, Flyway migrations, and schema compatibility checks. |
+| `sequenced-queue-worker-core` | `sequenced-queue-worker-core` | Internal Java worker loop shared by REST and direct Java worker helpers; contains no SQL or transport implementation. |
 | `sequenced-queue-server` | `sequenced-queue-server` | Spring Boot REST API and operational adapter. |
 | `sequenced-queue-java-client` | `sequenced-queue-java-client` | Java REST client and worker helper. |
 | `clients/java-direct` | `sequenced-queue-java-direct-client` | Trusted direct Java/PostgreSQL client backed by `sequenced-queue-core`. |

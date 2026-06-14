@@ -213,6 +213,16 @@ Queue logs may include identifiers, item type, status, operation, worker ID, res
 
 Queue logs must not include payload JSON, headers JSON, API key values, idempotency keys, raw SQL details, or stack traces for expected validation/conflict cases.
 
+## SQ-030 - Share Java Worker Loop Without Moving Queue Semantics
+
+Status: Accepted.
+
+The Java REST worker and trusted direct Java worker use `sequenced-queue-worker-core` for common polling and handler lifecycle behavior: `runOnce`, `runForever`, empty-queue backoff, heartbeat scheduling, no-handler failure, handler exception failure, lease-lost complete/fail suppression, and graceful shutdown.
+
+The shared worker module is transport-neutral. It contains no production SQL, no PostgreSQL access, no REST transport, and no source lease or head-item ordering rules. REST and direct Java transports adapt their existing clients into this worker loop, while queue semantics and production SQL remain in `sequenced-queue-core`.
+
+Public DTO names are not renamed in the release-candidate simplification pass. `ClaimItem` remains stable until a dedicated compatibility window.
+
 ## Resolved Former Undecided Items
 
 The following earlier undecided items are resolved:

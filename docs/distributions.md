@@ -4,6 +4,7 @@
 
 Includes:
 - sequenced-queue-core
+- sequenced-queue-worker-core
 - sequenced-queue-server
 - sequenced-queue-java-client
 - clients/java-direct
@@ -14,6 +15,8 @@ Required for:
 - strict per-source ordered work dispatch
 - Java REST workers
 - trusted direct Java/PostgreSQL workers
+
+`sequenced-queue-worker-core` is an internal Java worker-loop helper. It contains no production SQL, no REST transport, and no database access.
 
 ## Full Distribution
 

@@ -30,6 +30,7 @@ Current focus - v0.1.0-rc1 release readiness
 ## Modules
 
 - `sequenced-queue-core`: shared queue implementation, Flyway schema migration, plain JDBC PostgreSQL repository, transaction abstraction, leases, retries, dead-letter handling, and admin repair semantics.
+- `sequenced-queue-worker-core`: internal Java worker loop shared by the Java REST and trusted direct Java worker helpers. It has no PostgreSQL or REST transport implementation.
 - `sequenced-queue-server`: Spring Boot HTTP adapter, API key filter, Actuator metrics/health, and OpenAPI surface over `sequenced-queue-core`.
 - `sequenced-queue-java-client`: Java HTTP client and polling worker helper.
 - `clients/java-direct`: trusted/internal Java PostgreSQL adapter that uses the same `sequenced-queue-core` implementation through a caller-provided `DataSource`.
@@ -44,6 +45,7 @@ Current focus - v0.1.0-rc1 release readiness
 - [Release Checklist](RELEASE_CHECKLIST.md)
 - [Canonical Semantics](docs/semantics.md)
 - [Simplification Strategy](docs/simplification_strategy.md)
+- [Known Issues and Simplification Follow-ups](docs/ISSUES.md)
 - [Security and Database Privileges](docs/security.md)
 - [Versioning and Schema Compatibility](docs/versioning.md)
 - [OpenAPI Contract](docs/openapi.yaml)

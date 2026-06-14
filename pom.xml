@@ -12,6 +12,7 @@
 
   <modules>
     <module>sequenced-queue-core</module>
+    <module>sequenced-queue-worker-core</module>
     <module>sequenced-queue-server</module>
     <module>sequenced-queue-java-client</module>
     <module>clients/java-direct</module>

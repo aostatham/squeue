@@ -2,33 +2,35 @@ package com.example.sequencedqueue.client;
 
 import static com.example.sequencedqueue.client.SequencedQueueClient.*;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
+import com.sequencedqueue.worker.QueueWorkerEngine;
+import com.sequencedqueue.worker.QueueWorkerEngine.Claim;
+import com.sequencedqueue.worker.QueueWorkerEngine.ClaimCommand;
+import com.sequencedqueue.worker.QueueWorkerEngine.CompleteCommand;
+import com.sequencedqueue.worker.QueueWorkerEngine.FailCommand;
+import com.sequencedqueue.worker.QueueWorkerEngine.HeartbeatCommand;
+
 public class SequencedQueueWorker implements AutoCloseable {
-    private final SequencedQueueClient client;
-    private final String queueName;
-    private final String workerId;
-    private final List<String> supportedItemTypes;
-    private final int leaseSeconds;
-    private final Map<String, Function<ClaimItem, QueueResult>> handlers;
-    private volatile boolean running = true;
+    private final QueueWorkerEngine<ClaimItem, QueueResult> engine;
 
     private SequencedQueueWorker(Builder builder) {
-        this.client = builder.client;
-        this.queueName = builder.queueName;
-        this.workerId = builder.workerId;
-        this.supportedItemTypes = List.copyOf(builder.supportedItemTypes);
-        this.leaseSeconds = builder.leaseSeconds;
-        this.handlers = Map.copyOf(builder.handlers);
+        RestWorkerTransport transport = new RestWorkerTransport(builder.client);
+        this.engine = new QueueWorkerEngine<>(
+            transport,
+            QueueWorkerEngine.scheduledLeaseMonitorFactory(transport),
+            new RestItemView(),
+            new RestResultView(),
+            builder.queueName,
+            builder.workerId,
+            builder.supportedItemTypes,
+            builder.leaseSeconds,
+            builder.handlers
+        );
     }
 
     public static Builder builder(SequencedQueueClient client, String queueName) {
@@ -36,87 +38,20 @@ public class SequencedQueueWorker implements AutoCloseable {
     }
 
     public void runForever() {
-        long emptySleepMillis = 100;
-        while (running && !Thread.currentThread().isInterrupted()) {
-            if (!runOnce()) {
-                sleep(emptySleepMillis);
-                emptySleepMillis = Math.min(5000, emptySleepMillis * 2);
-                continue;
-            }
-            emptySleepMillis = 100;
-        }
+        engine.runForever();
     }
 
     public boolean runOnce() {
-        ClaimResponse claim = client.claim(queueName, new ClaimRequest(workerId, supportedItemTypes, leaseSeconds, 1));
-        if (claim.items() == null || claim.items().isEmpty()) {
-            return false;
-        }
-        handleClaim(claim);
-        return true;
+        return engine.runOnce();
     }
 
     public void stop() {
-        running = false;
+        engine.stop();
     }
 
     @Override
     public void close() {
         stop();
-    }
-
-    private void handleClaim(ClaimResponse claim) {
-        ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor();
-        AtomicBoolean leaseLost = new AtomicBoolean(false);
-        heartbeats.scheduleAtFixedRate(
-            () -> {
-                try {
-                    client.heartbeat(queueName, claim.leaseId(), new HeartbeatRequest(workerId, leaseSeconds));
-                } catch (RuntimeException e) {
-                    leaseLost.set(true);
-                    heartbeats.shutdown();
-                }
-            },
-            Math.max(1, leaseSeconds / 2),
-            Math.max(1, leaseSeconds / 2),
-            TimeUnit.SECONDS
-        );
-        try {
-            ClaimItem item = claim.items().getFirst();
-            Function<ClaimItem, QueueResult> handler = handlers.get(item.itemType());
-            if (handler == null) {
-                if (leaseLost.get()) {
-                    return;
-                }
-                client.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), false, "NO_HANDLER", "No handler for " + item.itemType(), null));
-                return;
-            }
-            QueueResult result = handler.apply(item);
-            if (leaseLost.get()) {
-                return;
-            }
-            if (result.succeeded()) {
-                client.complete(queueName, item.itemId(), new CompleteRequest(workerId, claim.leaseId(), result.result()));
-            } else {
-                client.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), result.retryable(), result.errorType(), result.errorMessage(), null));
-            }
-        } catch (Exception e) {
-            if (leaseLost.get()) {
-                return;
-            }
-            ClaimItem item = claim.items().getFirst();
-            client.fail(queueName, item.itemId(), new FailRequest(workerId, claim.leaseId(), true, e.getClass().getSimpleName(), e.getMessage(), null));
-        } finally {
-            heartbeats.shutdownNow();
-        }
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(Duration.ofMillis(millis));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 
     public static final class Builder {
@@ -162,5 +97,73 @@ public class SequencedQueueWorker implements AutoCloseable {
             }
             return new SequencedQueueWorker(this);
         }
+    }
+}
+
+final class RestWorkerTransport implements QueueWorkerEngine.Transport<ClaimItem>, QueueWorkerEngine.HeartbeatSender {
+    private final SequencedQueueClient client;
+
+    RestWorkerTransport(SequencedQueueClient client) {
+        this.client = client;
+    }
+
+    @Override
+    public Claim<ClaimItem> claim(String queueName, ClaimCommand command) {
+        ClaimResponse claim = client.claim(queueName, new ClaimRequest(command.workerId(), command.supportedItemTypes(), command.leaseSeconds(), command.maxItems()));
+        return new Claim<>(claim.leaseId(), claim.items());
+    }
+
+    @Override
+    public void heartbeat(String queueName, java.util.UUID leaseId, HeartbeatCommand command) {
+        client.heartbeat(queueName, leaseId, new HeartbeatRequest(command.workerId(), command.extendBySeconds()));
+    }
+
+    @Override
+    public void complete(String queueName, java.util.UUID itemId, CompleteCommand command) {
+        client.complete(queueName, itemId, new CompleteRequest(command.workerId(), command.leaseId(), command.result()));
+    }
+
+    @Override
+    public void fail(String queueName, java.util.UUID itemId, FailCommand command) {
+        client.fail(queueName, itemId, new FailRequest(command.workerId(), command.leaseId(), command.retryable(), command.errorType(), command.errorMessage(), command.backoffSeconds()));
+    }
+}
+
+final class RestItemView implements QueueWorkerEngine.ItemView<ClaimItem> {
+    @Override
+    public java.util.UUID itemId(ClaimItem item) {
+        return item.itemId();
+    }
+
+    @Override
+    public String itemType(ClaimItem item) {
+        return item.itemType();
+    }
+}
+
+final class RestResultView implements QueueWorkerEngine.ResultView<QueueResult> {
+    @Override
+    public boolean succeeded(QueueResult result) {
+        return result.succeeded();
+    }
+
+    @Override
+    public boolean retryable(QueueResult result) {
+        return result.retryable();
+    }
+
+    @Override
+    public String errorType(QueueResult result) {
+        return result.errorType();
+    }
+
+    @Override
+    public String errorMessage(QueueResult result) {
+        return result.errorMessage();
+    }
+
+    @Override
+    public Map<String, Object> result(QueueResult result) {
+        return result.result();
     }
 }

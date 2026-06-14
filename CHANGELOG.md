@@ -15,6 +15,7 @@ This release candidate is not a v1.0 production maturity claim. It establishes t
 - Java REST client and polling worker helper.
 - Python REST client and polling worker helper.
 - Trusted direct Java/PostgreSQL client that delegates to the shared core implementation.
+- Internal Java worker loop shared by Java REST and direct worker helpers.
 - Shared `sequenced-queue-core` implementation for production SQL, queue semantics, validation, and schema compatibility checks.
 - Flyway-managed schema migrations with current schema version `4`.
 - API key baseline with separate worker and admin keys.

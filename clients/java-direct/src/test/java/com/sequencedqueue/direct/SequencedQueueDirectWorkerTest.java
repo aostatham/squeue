@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import com.sequencedqueue.worker.QueueWorkerEngine;
 import org.junit.jupiter.api.Test;
 
 class SequencedQueueDirectWorkerTest {
@@ -61,9 +62,9 @@ class SequencedQueueDirectWorkerTest {
         );
     }
 
-    private static final class ImmediateLeaseLostMonitorFactory implements DirectWorkerLeaseMonitorFactory {
+    private static final class ImmediateLeaseLostMonitorFactory implements QueueWorkerEngine.LeaseMonitorFactory {
         @Override
-        public DirectWorkerLeaseMonitor start(String queueName, UUID leaseId, HeartbeatRequest request, AtomicBoolean leaseLost) {
+        public QueueWorkerEngine.LeaseMonitor start(String queueName, UUID leaseId, QueueWorkerEngine.HeartbeatCommand request, AtomicBoolean leaseLost) {
             leaseLost.set(true);
             return () -> {
             };
@@ -84,6 +85,10 @@ class SequencedQueueDirectWorkerTest {
         @Override
         public ClaimResponse claim(String queueName, ClaimRequest request) {
             return claim;
+        }
+
+        @Override
+        public void heartbeat(String queueName, UUID leaseId, HeartbeatRequest request) {
         }
 
         @Override

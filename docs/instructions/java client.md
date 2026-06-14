@@ -201,13 +201,13 @@ EnqueueResponse response = client.enqueue("wf.commands",
 ## 8.2 Worker claim API
 
 ```java
-Optional<ClaimedItem> claimNext(ClaimRequest request);
+Optional<ClaimItem> claimNext(ClaimRequest request);
 ```
 
 Example:
 
 ```java
-Optional<ClaimedItem> claim = client.claimNext(ClaimRequest.builder()
+Optional<ClaimItem> claim = client.claimNext(ClaimRequest.builder()
     .queueName("wf.commands")
     .workerId("worker-1")
     .supportedItemTypes(List.of("wf.command"))

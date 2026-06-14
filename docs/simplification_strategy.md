@@ -74,3 +74,11 @@ Stage 3A Minimal Production Hardening should keep the system deployable and unde
 - keep the direct Java client thin over `sequenced-queue-core`
 - add manual retention purge only; no scheduler or archive table
 - avoid expanding product surface into deferred areas
+
+## S1 Simplification Sprint Baseline
+
+The Java REST and trusted direct Java worker helpers share `sequenced-queue-worker-core` for polling, heartbeat scheduling, no-handler failure, handler exception mapping, lease-lost suppression, graceful shutdown, and empty-queue backoff.
+
+The shared worker module is deliberately transport-neutral. It contains no queue SQL, no PostgreSQL access, no REST client code, and no source lease or head-item ordering rules.
+
+Public DTO names and example module boundaries remain stable for the release candidate. Renaming `ClaimItem` to `ClaimedItem` or collapsing runnable example modules is deferred until there is a compatibility window and a clearer packaging policy.
