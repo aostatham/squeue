@@ -24,12 +24,12 @@ class QueueHealthIndicatorTest {
 
     @Test
     void healthIsOutOfServiceWhenSchemaIsStale() throws Exception {
-        QueueHealthIndicator indicator = indicator("1");
+        QueueHealthIndicator indicator = indicator("0");
 
         var health = indicator.health();
 
         assertEquals(Status.OUT_OF_SERVICE, health.getStatus());
-        assertEquals("1", health.getDetails().get("schemaVersion"));
+        assertEquals("0", health.getDetails().get("schemaVersion"));
         assertEquals(QueueSchemaInfo.REQUIRED_SCHEMA_VERSION, health.getDetails().get("requiredSchemaVersion"));
         assertEquals(false, health.getDetails().get("schemaCurrent"));
     }
@@ -46,7 +46,7 @@ class QueueHealthIndicatorTest {
 
     @Test
     void healthIsOutOfServiceWhenAdminAuditTableIsMissing() throws Exception {
-        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo("3", true, true, false), true);
+        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo(QueueSchemaInfo.REQUIRED_SCHEMA_VERSION, true, true, false), true);
 
         var health = indicator.health();
 
@@ -67,7 +67,7 @@ class QueueHealthIndicatorTest {
 
     @Test
     void healthReportsRecoveryDisabledAsOutOfService() throws Exception {
-        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo("3", true, true, true), false);
+        QueueHealthIndicator indicator = indicator(new QueueSchemaInfo(QueueSchemaInfo.REQUIRED_SCHEMA_VERSION, true, true, true), false);
 
         var health = indicator.health();
 

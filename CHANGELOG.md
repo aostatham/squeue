@@ -17,7 +17,7 @@ This release candidate is not a v1.0 production maturity claim. It establishes t
 - Trusted direct Java/PostgreSQL client that delegates to the shared core implementation.
 - Internal Java worker loop shared by Java REST and direct worker helpers.
 - Shared `sequenced-queue-core` implementation for production SQL, queue semantics, validation, and schema compatibility checks.
-- Flyway-managed schema migrations with current schema version `4`.
+- Flyway-managed pre-release schema baseline `V1`.
 - API key baseline with separate worker and admin keys.
 - Admin audit table and audit records for successful admin repair and retention purge operations.
 - Micrometer metrics and Actuator health checks.
@@ -46,7 +46,7 @@ This release candidate is not a v1.0 production maturity claim. It establishes t
 
 ### Operational
 
-- Health reports schema version, required schema version, schema currency, table presence, database reachability, and recovery status.
+- Health reports schema baseline compatibility, required schema baseline, table presence, database reachability, and recovery status.
 - Metrics cover queue depth, source state, claims, completions, failures, heartbeats, lease expiries, and admin operations.
 - Docker-backed PostgreSQL contract suites must run without skips for release approval.
 

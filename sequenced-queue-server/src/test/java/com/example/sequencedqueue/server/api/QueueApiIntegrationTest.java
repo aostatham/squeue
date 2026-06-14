@@ -281,8 +281,8 @@ class QueueApiIntegrationTest {
         assertEquals(true, details.get("queueItemTablePresent"));
         assertEquals(true, details.get("queueSourceStateTablePresent"));
         assertEquals(true, details.get("adminAuditTablePresent"));
-        assertEquals("4", details.get("schemaVersion"));
-        assertEquals("4", details.get("requiredSchemaVersion"));
+        assertEquals("1", details.get("schemaVersion"));
+        assertEquals("1", details.get("requiredSchemaVersion"));
         assertEquals(true, details.get("schemaCurrent"));
         assertEquals(true, details.get("recoveryEnabled"));
     }

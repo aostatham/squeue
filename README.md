@@ -232,7 +232,7 @@ List endpoints support `limit` and `offset`.
 
 The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
 
-The database must already have the `sequenced-queue-core` Flyway migrations applied. The current direct Java client requires schema version `4`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
+The database must already have the `sequenced-queue-core` Flyway baseline applied. For the current pre-release build, the database schema baseline is `V1`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
 
 Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, manual retention purge, idempotency handling, per-source sequence assignment, and schema version lookup.
 

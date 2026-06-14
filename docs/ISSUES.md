@@ -19,3 +19,18 @@ Decision: keep the split for now. Reconsider consolidation only if release packa
 OpenAPI remains checked in as YAML with drift tests against implemented routes and typed schema checks.
 
 Decision: keep checked-in YAML for the release candidate. Reconsider generated OpenAPI only if manual maintenance becomes the main source of drift.
+
+## Post-Go-Live Schema Migration Policy
+
+The current pre-release build has a single schema baseline: `V1`. Pre-release development migrations are collapsed into that baseline because there are no live production databases that require historical upgrades.
+
+After the product has a released schema used by real deployments, future schema changes must be delivered as additive versioned migrations.
+
+Future work:
+
+- define compatibility window policy
+- define destructive migration rules
+- define direct Java client compatibility matrix
+- define server/client/schema version matrix
+- define rollback/backup expectations
+- ensure direct clients fail fast on incompatible schemas

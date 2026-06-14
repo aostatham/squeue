@@ -2,11 +2,11 @@
 
 The intended release candidate is `0.1.0-rc1`.
 
-The current queue schema version is `4`.
+For the current pre-release build, the database schema baseline is `V1`.
 
 The REST server and trusted direct Java client read Flyway schema history through `sequenced-queue-core`.
 
-The direct Java client requires schema version `4`. When `validateSchemaOnBuild(true)` is enabled, the direct client builder fails fast if the current schema version is missing or incompatible.
+The direct Java client validates that the database schema is compatible with the pre-release `V1` baseline. When `validateSchemaOnBuild(true)` is enabled, the direct client builder fails fast if the current schema baseline is missing or incompatible.
 
 ## Artifacts
 
@@ -31,11 +31,8 @@ The Docker image tag used in local documentation is `sequenced-queue-server:0.1.
 
 ## Schema Compatibility
 
-Migration policy:
+The project currently has a single pre-release schema baseline: `V1`. Pre-release development migrations have been collapsed into that baseline because there are no live production databases that require in-place upgrades.
 
-- migrations should be additive and non-destructive by default
-- destructive migrations require a documented migration plan
-- compatibility windows must be explicit before a destructive or incompatible migration is introduced
-- generated or published artifacts are not yet considered v1.0 stable
+Post-go-live schema migrations will be introduced only after a released schema must be upgraded in place. The future migration policy is tracked in [ISSUES](ISSUES.md).
 
 Schema compatibility is about queue storage semantics, not API-key authentication. The direct Java client bypasses REST API-key security and should use a least-privilege database role.

@@ -557,7 +557,7 @@ class PostgresQueueContractTest {
 
     @Test
     void schemaInfoReportsFlywayVersion() {
-        assertEquals("4", queue.getSchemaInfo().schemaVersion());
+        assertEquals("1", queue.getSchemaInfo().schemaVersion());
     }
 
     private EnqueueResponse enqueue(String sourceId) {
