@@ -14,9 +14,12 @@ sequenced-queue:
   max-lease-seconds: 600
   default-max-attempts: 5
   max-payload-bytes: 262144
-  max-headers-bytes: 65536
+  max-headers-bytes: 32768
+  max-result-bytes: 262144
+  max-error-type-bytes: 256
   max-error-message-bytes: 8192
   max-admin-reason-bytes: 2048
+  max-admin-metadata-bytes: 32768
   max-retention-purge-batch-size: 10000
   api-key: ${SEQUENCED_QUEUE_API_KEY:dev-key}
   admin-api-key: ${SEQUENCED_QUEUE_ADMIN_API_KEY:dev-admin-key}

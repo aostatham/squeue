@@ -198,6 +198,8 @@ SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
 
 The direct client delegates to `sequenced-queue-core`. For the current pre-release build, it requires schema baseline `V1`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema baseline is not `V1`, the builder throws `QueueUnavailableException` and the client is not created.
 
+Oversized direct-client fields are rejected by core as `QueueFieldTooLargeException`, with `fieldName`, `maxBytes`, and `actualBytes` available without exposing the oversized content.
+
 See [Versioning](versioning.md) for schema compatibility policy and [Security](security.md) for least-privilege database role guidance.
 
 For long-running direct workers, prefer the helper:
@@ -227,7 +229,7 @@ client.enqueue(
 )
 ```
 
-The Python client is also REST-only. It does not access PostgreSQL directly.
+The Python client is also REST-only. It does not access PostgreSQL directly. If the server returns `FIELD_TOO_LARGE`, the client preserves the structured response details on the raised exception.
 
 ## Worker Lifecycle
 

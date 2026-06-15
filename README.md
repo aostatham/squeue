@@ -161,13 +161,16 @@ sequenced-queue.default-lease-seconds=60
 sequenced-queue.max-lease-seconds=600
 sequenced-queue.default-max-attempts=5
 sequenced-queue.max-payload-bytes=262144
-sequenced-queue.max-headers-bytes=65536
+sequenced-queue.max-headers-bytes=32768
+sequenced-queue.max-result-bytes=262144
+sequenced-queue.max-error-type-bytes=256
 sequenced-queue.max-error-message-bytes=8192
 sequenced-queue.max-admin-reason-bytes=2048
+sequenced-queue.max-admin-metadata-bytes=32768
 sequenced-queue.max-retention-purge-batch-size=10000
 ```
 
-These limits are enforced in `sequenced-queue-core`, not only by REST controllers.
+These limits are enforced in `sequenced-queue-core`, not only by REST controllers. Oversized content is not echoed in REST error responses, direct Java exceptions, or application logs.
 
 REST errors use a stable shape:
 
@@ -175,6 +178,19 @@ REST errors use a stable shape:
 {
   "errorCode": "LEASE_LOST",
   "message": "lease is not held by worker",
+  "details": {}
+}
+```
+
+Oversized fields use `FIELD_TOO_LARGE` and include safe byte counts:
+
+```json
+{
+  "errorCode": "FIELD_TOO_LARGE",
+  "message": "payload exceeds configured size limit",
+  "fieldName": "payload",
+  "maxBytes": 262144,
+  "actualBytes": 300112,
   "details": {}
 }
 ```
@@ -236,9 +252,13 @@ The database must already have the `sequenced-queue-core` Flyway baseline applie
 
 Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, manual retention purge, idempotency handling, per-source sequence assignment, and schema version lookup.
 
+Oversized direct-client fields are rejected as `QueueFieldTooLargeException`, which exposes `fieldName`, `maxBytes`, and `actualBytes` without exposing the oversized content.
+
 ## Python REST Client
 
 The Python package in `sequenced-queue-python-client` is an HTTP client and worker helper. It uses the REST API and does not access PostgreSQL directly.
+
+If the server returns `FIELD_TOO_LARGE`, the Python client preserves the structured error details on `QueueClientError`.
 
 Run its tests with:
 

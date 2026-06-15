@@ -31,6 +31,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/**
+ * Test coverage for SequencedQueueDirectClientTest.
+ */
 @Testcontainers
 class SequencedQueueDirectClientTest {
     @Container
@@ -55,6 +58,9 @@ class SequencedQueueDirectClientTest {
         execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
     }
 
+    /**
+     * Verifies concurrent enqueues to same source produce contiguous sequence numbers.
+     */
     @Test
     void concurrentEnqueuesToSameSourceProduceContiguousSequenceNumbers() throws Exception {
         int itemCount = 100;
@@ -93,6 +99,9 @@ class SequencedQueueDirectClientTest {
         }
     }
 
+    /**
+     * Verifies idempotency key returns existing item without advancing source sequence.
+     */
     @Test
     void idempotencyKeyReturnsExistingItemWithoutAdvancingSourceSequence() {
         EnqueueRequest request = EnqueueRequest.builder()
@@ -116,6 +125,9 @@ class SequencedQueueDirectClientTest {
         assertEquals(2, next.sequenceNo());
     }
 
+    /**
+     * Verifies direct claim complete uses shared core.
+     */
     @Test
     void directClaimCompleteUsesSharedCore() {
         EnqueueResponse enqueued = client.enqueue("wf.commands", EnqueueRequest.builder()
@@ -131,6 +143,9 @@ class SequencedQueueDirectClientTest {
         assertEquals("succeeded", completed.status());
     }
 
+    /**
+     * Verifies direct wrong lease cannot complete.
+     */
     @Test
     void directWrongLeaseCannotComplete() {
         client.enqueue("wf.commands", EnqueueRequest.builder()
@@ -147,6 +162,9 @@ class SequencedQueueDirectClientTest {
         assertEquals(LeaseLostException.class, error.getClass());
     }
 
+    /**
+     * Verifies direct heartbeat after expiry fails.
+     */
     @Test
     void directHeartbeatAfterExpiryFails() throws Exception {
         client.enqueue("wf.commands", EnqueueRequest.builder()
@@ -163,6 +181,9 @@ class SequencedQueueDirectClientTest {
             client.heartbeat("wf.commands", claim.leaseId(), new HeartbeatRequest("worker-1", 60)));
     }
 
+    /**
+     * Verifies direct exception mapping uses core error codes.
+     */
     @Test
     void directExceptionMappingUsesCoreErrorCodes() {
         assertThrows(InvalidQueueRequestException.class, () ->
@@ -192,6 +213,79 @@ class SequencedQueueDirectClientTest {
         assertThrows(SourceBlockedException.class, () -> client.unblockSource("wf.commands", "inst-not-claimed"));
     }
 
+    /**
+     * Verifies direct enqueue maps oversized payload to structured typed exception.
+     */
+    @Test
+    void directEnqueuePayloadTooLargeThrowsStructuredException() {
+        String secretPayload = "secret-direct-payload-" + "x".repeat(270_000);
+
+        QueueFieldTooLargeException error = assertThrows(QueueFieldTooLargeException.class, () ->
+            client.enqueue("wf.commands", EnqueueRequest.builder()
+                .sourceId("inst-direct-limit-payload")
+                .itemType("wf.command")
+                .payloadJson("{\"secret\":\"" + secretPayload + "\"}")
+                .headersJson("{}")
+                .build()));
+
+        assertEquals("payload", error.fieldName());
+        assertEquals(262144, error.maxBytes());
+        assertTrue(error.actualBytes() > 262144);
+        assertEquals("wf.commands", error.queueName());
+        assertFalse(error.getMessage().contains(secretPayload));
+    }
+
+    /**
+     * Verifies direct complete maps oversized result to structured typed exception.
+     */
+    @Test
+    void directCompleteResultTooLargeThrowsStructuredException() {
+        EnqueueResponse enqueued = client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-direct-limit-result")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        ClaimResponse claim = client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 60, 1));
+        String secretResult = "secret-direct-result-" + "x".repeat(270_000);
+
+        QueueFieldTooLargeException error = assertThrows(QueueFieldTooLargeException.class, () ->
+            client.complete("wf.commands", enqueued.itemId(), new CompleteRequest("worker-1", claim.leaseId(), Map.of("secret", secretResult))));
+
+        assertEquals("result", error.fieldName());
+        assertEquals(enqueued.itemId(), error.itemId());
+        assertEquals(262144, error.maxBytes());
+        assertTrue(error.actualBytes() > 262144);
+        assertFalse(error.getMessage().contains(secretResult));
+    }
+
+    /**
+     * Verifies direct fail maps oversized error type to structured typed exception.
+     */
+    @Test
+    void directFailErrorTypeTooLargeThrowsStructuredException() {
+        EnqueueResponse enqueued = client.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("inst-direct-limit-error-type")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        ClaimResponse claim = client.claim("wf.commands", new ClaimRequest("worker-1", List.of("wf.command"), 60, 1));
+        String secretType = "SECRET_" + "X".repeat(300);
+
+        QueueFieldTooLargeException error = assertThrows(QueueFieldTooLargeException.class, () ->
+            client.fail("wf.commands", enqueued.itemId(), new FailRequest("worker-1", claim.leaseId(), false, secretType, "safe", null)));
+
+        assertEquals("errorType", error.fieldName());
+        assertEquals(enqueued.itemId(), error.itemId());
+        assertEquals(256, error.maxBytes());
+        assertTrue(error.actualBytes() > 256);
+        assertFalse(error.getMessage().contains(secretType));
+    }
+
+    /**
+     * Verifies direct admin skip dead lettered head unblocks source.
+     */
     @Test
     void directAdminSkipDeadLetteredHeadUnblocksSource() throws Exception {
         EnqueueResponse first = client.enqueue("wf.commands", EnqueueRequest.builder()
@@ -217,11 +311,17 @@ class SequencedQueueDirectClientTest {
         assertEquals(2, next.items().getFirst().sequenceNo());
     }
 
+    /**
+     * Verifies direct client reads flyway schema version.
+     */
     @Test
     void directClientReadsFlywaySchemaVersion() {
         assertEquals("1", client.getSchemaInfo().schemaVersion());
     }
 
+    /**
+     * Verifies direct worker run once completes one item against flyway managed postgres.
+     */
     @Test
     void directWorkerRunOnceCompletesOneItemAgainstFlywayManagedPostgres() {
         EnqueueResponse enqueued = client.enqueue("wf.commands", EnqueueRequest.builder()

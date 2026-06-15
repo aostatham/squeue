@@ -13,6 +13,8 @@ The admin key may also call worker endpoints. The server rejects startup when th
 
 This is not OAuth/OIDC, dynamic API-key lifecycle management, hashed key storage, or identity-provider integration.
 
+Oversized payload, header, result, error, reason, and audit metadata values are rejected with safe structured errors. The server and clients expose field names and byte counts for these failures, but do not echo or log the oversized content.
+
 ## REST Server Database Access
 
 The REST server owns schema migration and queue operation execution. It needs database access for:

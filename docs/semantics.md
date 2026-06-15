@@ -158,10 +158,13 @@ Current global request limits:
 - `defaultMaxAttempts`
 - `maxPayloadBytes`
 - `maxHeadersBytes`
+- `maxResultBytes`
+- `maxErrorTypeBytes`
 - `maxErrorMessageBytes`
 - `maxAdminReasonBytes`
+- `maxAdminMetadataBytes`
 
-These are enforced in `sequenced-queue-core`.
+Byte-size limits are measured as UTF-8 bytes after the same compact JSON or string serialization that core stores. Oversized fields fail in `sequenced-queue-core` with stable error code `FIELD_TOO_LARGE` and safe `fieldName`, `maxBytes`, and `actualBytes` details.
 
 ## Structured Logging Policy
 
@@ -175,11 +178,13 @@ Queue/server logs use safe event fields only:
 - `workerId`
 - `operation`
 - `status`
-- `result`
 - `errorCode`
+- `fieldName`
+- `maxBytes`
+- `actualBytes`
 - retention `matched` and `deleted` counts
 
-Logs must not include payload JSON, headers JSON, API key values, idempotency key values, raw SQL details, or full stack traces for expected validation/conflict paths.
+Logs must not include payload JSON, headers JSON, result JSON, error message content, admin reason content, admin metadata content, API key values, idempotency key values, raw SQL details, or full stack traces for expected validation/conflict paths.
 
 ## REST and Direct Java Access
 

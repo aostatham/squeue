@@ -2,6 +2,7 @@ package com.sequencedqueue.core;
 
 import static com.sequencedqueue.core.QueueDtos.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Clock;
@@ -17,7 +18,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
+/**
+ * Test coverage for DefaultQueueServiceTest.
+ */
 class DefaultQueueServiceTest {
+    /**
+     * Verifies enqueue rereads existing item after duplicate idempotency race.
+     */
     @Test
     void enqueueRereadsExistingItemAfterDuplicateIdempotencyRace() {
         FakeRepository repository = new FakeRepository();
@@ -34,6 +41,9 @@ class DefaultQueueServiceTest {
         assertEquals(3, repository.findByIdempotencyCalls);
     }
 
+    /**
+     * Verifies claim marks idle dead lettered heads blocked before trying to claim.
+     */
     @Test
     void claimMarksIdleDeadLetteredHeadsBlockedBeforeTryingToClaim() {
         FakeRepository repository = new FakeRepository();
@@ -44,6 +54,9 @@ class DefaultQueueServiceTest {
         assertEquals(1, repository.blockDeadLetteredHeadSourcesCalls);
     }
 
+    /**
+     * Verifies unblock does not release leased source.
+     */
     @Test
     void unblockDoesNotReleaseLeasedSource() {
         FakeRepository repository = new FakeRepository();
@@ -56,6 +69,9 @@ class DefaultQueueServiceTest {
         assertEquals(0, repository.releaseSourceCalls);
     }
 
+    /**
+     * Verifies unblock source rejects when dead lettered head remains.
+     */
     @Test
     void unblockSourceRejectsWhenDeadLetteredHeadRemains() {
         FakeRepository repository = new FakeRepository();
@@ -70,6 +86,9 @@ class DefaultQueueServiceTest {
         assertEquals(0, repository.skipDeadLetteredHeadCalls);
     }
 
+    /**
+     * Verifies unblock source rejects when processing head remains.
+     */
     @Test
     void unblockSourceRejectsWhenProcessingHeadRemains() {
         FakeRepository repository = new FakeRepository();
@@ -83,6 +102,9 @@ class DefaultQueueServiceTest {
         assertEquals(0, repository.releaseSourceCalls);
     }
 
+    /**
+     * Verifies unblock source does not change item status.
+     */
     @Test
     void unblockSourceDoesNotChangeItemStatus() {
         FakeRepository repository = new FakeRepository();
@@ -97,6 +119,9 @@ class DefaultQueueServiceTest {
         assertEquals(0, repository.skipDeadLetteredHeadCalls);
     }
 
+    /**
+     * Verifies unblock source succeeds only after dead lettered head was repaired.
+     */
     @Test
     void unblockSourceSucceedsOnlyAfterDeadLetteredHeadWasRepaired() {
         FakeRepository repository = new FakeRepository();
@@ -109,6 +134,9 @@ class DefaultQueueServiceTest {
         assertEquals(1, repository.releaseSourceCalls);
     }
 
+    /**
+     * Verifies admin skip rejects processing item and does not release source.
+     */
     @Test
     void adminSkipRejectsProcessingItemAndDoesNotReleaseSource() {
         FakeRepository repository = new FakeRepository();
@@ -121,6 +149,9 @@ class DefaultQueueServiceTest {
         assertEquals(0, repository.releaseSourceCalls);
     }
 
+    /**
+     * Verifies recovery releases source only when lease matches expired item.
+     */
     @Test
     void recoveryReleasesSourceOnlyWhenLeaseMatchesExpiredItem() {
         FakeRepository repository = new FakeRepository();
@@ -138,6 +169,9 @@ class DefaultQueueServiceTest {
         assertEquals(1, repository.releaseSourceCalls);
     }
 
+    /**
+     * Verifies rejects null request bodies.
+     */
     @Test
     void rejectsNullRequestBodies() {
         DefaultQueueService service = service(new FakeRepository());
@@ -150,6 +184,9 @@ class DefaultQueueServiceTest {
         assertBadRequest(() -> service.purgeRetention("q", null));
     }
 
+    /**
+     * Verifies rejects invalid numeric request values.
+     */
     @Test
     void rejectsInvalidNumericRequestValues() {
         DefaultQueueService service = service(new FakeRepository());
@@ -162,6 +199,9 @@ class DefaultQueueServiceTest {
         assertBadRequest(() -> service.fail("q", UUID.randomUUID(), new FailRequest("worker-1", UUID.randomUUID(), true, "ERR", "bad", -1)));
     }
 
+    /**
+     * Verifies payload within limit is accepted and omitted max attempts uses default.
+     */
     @Test
     void payloadWithinLimitIsAcceptedAndOmittedMaxAttemptsUsesDefault() {
         FakeRepository repository = new FakeRepository();
@@ -173,27 +213,79 @@ class DefaultQueueServiceTest {
         assertEquals(7, repository.lastInsertMaxAttempts);
     }
 
+    /**
+     * Verifies enqueue rejects payload over limit.
+     */
     @Test
     void enqueueRejectsPayloadOverLimit() {
         DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 8, 32, 32, 32, 100));
 
-        assertBadRequest(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of("tooLarge", "value"), Map.of(), null, null)));
+        QueueFieldTooLargeException error = assertFieldTooLarge(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of("tooLarge", "value"), Map.of(), null, null)));
+
+        assertEquals("payload", error.fieldName());
+        assertEquals(8, error.maxBytes());
+        assertEquals("q", error.queueName());
     }
 
+    /**
+     * Verifies enqueue rejects headers over limit.
+     */
     @Test
     void enqueueRejectsHeadersOverLimit() {
         DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 8, 32, 32, 100));
 
-        assertBadRequest(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of(), Map.of("tooLarge", "value"), null, null)));
+        QueueFieldTooLargeException error = assertFieldTooLarge(() -> service.enqueue("q", new EnqueueRequest("s", "type", null, Map.of(), Map.of("tooLarge", "value"), null, null)));
+
+        assertEquals("headers", error.fieldName());
+        assertEquals(8, error.maxBytes());
     }
 
+    /**
+     * Verifies complete rejects result over limit.
+     */
+    @Test
+    void completeRejectsResultOverLimit() {
+        UUID itemId = UUID.randomUUID();
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 8, 32, 32, 32, 32, 100));
+
+        QueueFieldTooLargeException error = assertFieldTooLarge(() -> service.complete("q", itemId, new CompleteRequest("worker-1", UUID.randomUUID(), Map.of("tooLarge", "value"))));
+
+        assertEquals("result", error.fieldName());
+        assertEquals(8, error.maxBytes());
+        assertEquals(itemId, error.itemId());
+    }
+
+    /**
+     * Verifies fail rejects error message over limit.
+     */
     @Test
     void failRejectsErrorMessageOverLimit() {
         DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 4, 32, 100));
 
-        assertBadRequest(() -> service.fail("q", UUID.randomUUID(), new FailRequest("worker-1", UUID.randomUUID(), false, "ERR", "12345", null)));
+        QueueFieldTooLargeException error = assertFieldTooLarge(() -> service.fail("q", UUID.randomUUID(), new FailRequest("worker-1", UUID.randomUUID(), false, "ERR", "12345", null)));
+
+        assertEquals("errorMessage", error.fieldName());
+        assertEquals(4, error.maxBytes());
+        assertFalse(error.getMessage().contains("12345"));
     }
 
+    /**
+     * Verifies fail rejects error type over limit.
+     */
+    @Test
+    void failRejectsErrorTypeOverLimit() {
+        DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 32, 4, 32, 32, 32, 100));
+
+        QueueFieldTooLargeException error = assertFieldTooLarge(() -> service.fail("q", UUID.randomUUID(), new FailRequest("worker-1", UUID.randomUUID(), false, "TOO_LONG", "safe", null)));
+
+        assertEquals("errorType", error.fieldName());
+        assertEquals(4, error.maxBytes());
+        assertFalse(error.getMessage().contains("TOO_LONG"));
+    }
+
+    /**
+     * Verifies claim rejects lease seconds over max.
+     */
     @Test
     void claimRejectsLeaseSecondsOverMax() {
         DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 32, 32, 100));
@@ -201,19 +293,41 @@ class DefaultQueueServiceTest {
         assertBadRequest(() -> service.claim("q", new ClaimRequest("worker-1", List.of("type"), 121, 1)));
     }
 
+    /**
+     * Verifies admin operations reject reason over limit.
+     */
     @Test
     void adminOperationsRejectReasonOverLimit() {
         FakeRepository repository = new FakeRepository();
         DefaultQueueService service = service(repository, new QueueSettings(60, 120, 5, 64, 64, 32, 4, 100));
         String reason = "12345";
 
-        assertBadRequest(() -> service.retry("q", repository.lockedItem.itemId(), "admin", reason));
-        assertBadRequest(() -> service.skip("q", repository.lockedItem.itemId(), "admin", reason));
-        assertBadRequest(() -> service.cancel("q", repository.lockedItem.itemId(), "admin", reason));
-        assertBadRequest(() -> service.unblockSource("q", "s", "admin", reason));
-        assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded"), false, reason), "admin"));
+        assertEquals("adminReason", assertFieldTooLarge(() -> service.retry("q", repository.lockedItem.itemId(), "admin", reason)).fieldName());
+        assertEquals("adminReason", assertFieldTooLarge(() -> service.skip("q", repository.lockedItem.itemId(), "admin", reason)).fieldName());
+        assertEquals("adminReason", assertFieldTooLarge(() -> service.cancel("q", repository.lockedItem.itemId(), "admin", reason)).fieldName());
+        assertEquals("adminReason", assertFieldTooLarge(() -> service.unblockSource("q", "s", "admin", reason)).fieldName());
+        assertEquals("adminReason", assertFieldTooLarge(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded"), false, reason), "admin")).fieldName());
     }
 
+    /**
+     * Verifies admin audit metadata is size limited.
+     */
+    @Test
+    void adminAuditMetadataOverLimitIsRejected() {
+        FakeRepository repository = new FakeRepository();
+        repository.retentionMatched = 1;
+        repository.retentionDeleted = 1;
+        DefaultQueueService service = service(repository, new QueueSettings(60, 120, 5, 64, 64, 64, 64, 64, 64, 4, 100));
+
+        QueueFieldTooLargeException error = assertFieldTooLarge(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded"), false, "ok", 1), "admin"));
+
+        assertEquals("adminMetadata", error.fieldName());
+        assertEquals(4, error.maxBytes());
+    }
+
+    /**
+     * Verifies retention purge rejects blocking statuses.
+     */
     @Test
     void retentionPurgeRejectsBlockingStatuses() {
         DefaultQueueService service = service(new FakeRepository());
@@ -224,6 +338,9 @@ class DefaultQueueServiceTest {
         assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("dead_lettered"), false, "cleanup")));
     }
 
+    /**
+     * Verifies retention purge rejects zero limit.
+     */
     @Test
     void retentionPurgeRejectsZeroLimit() {
         DefaultQueueService service = service(new FakeRepository());
@@ -231,6 +348,9 @@ class DefaultQueueServiceTest {
         assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded"), false, "cleanup", 0)));
     }
 
+    /**
+     * Verifies retention purge rejects limit above max.
+     */
     @Test
     void retentionPurgeRejectsLimitAboveMax() {
         DefaultQueueService service = service(new FakeRepository(), new QueueSettings(60, 120, 5, 64, 64, 32, 32, 10));
@@ -238,6 +358,9 @@ class DefaultQueueServiceTest {
         assertBadRequest(() -> service.purgeRetention("q", new RetentionPurgeRequest(now(), List.of("succeeded"), false, "cleanup", 11)));
     }
 
+    /**
+     * Verifies retention dry run counts without deleting or auditing.
+     */
     @Test
     void retentionDryRunCountsWithoutDeletingOrAuditing() {
         FakeRepository repository = new FakeRepository();
@@ -253,6 +376,9 @@ class DefaultQueueServiceTest {
         assertEquals(0, repository.adminAuditCalls);
     }
 
+    /**
+     * Verifies retention actual purge deletes eligible statuses and writes audit.
+     */
     @Test
     void retentionActualPurgeDeletesEligibleStatusesAndWritesAudit() {
         FakeRepository repository = new FakeRepository();
@@ -299,6 +425,13 @@ class DefaultQueueServiceTest {
     private static void assertBadRequest(Executable executable) {
         QueueException error = assertThrows(QueueException.class, executable);
         assertEquals(QueueException.BAD_REQUEST, error.statusCode());
+    }
+
+    private static QueueFieldTooLargeException assertFieldTooLarge(Executable executable) {
+        QueueFieldTooLargeException error = assertThrows(QueueFieldTooLargeException.class, executable);
+        assertEquals(QueueException.BAD_REQUEST, error.statusCode());
+        assertEquals(QueueErrorCode.FIELD_TOO_LARGE, error.errorCode());
+        return error;
     }
 
     private static final class FakeRepository implements QueueRepository {

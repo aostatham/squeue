@@ -6,6 +6,11 @@ paths:
   /queues/{queueName}/items:
     post:
       summary: Enqueue an item
+      description: >
+        Creates one item for a source. The server enforces global UTF-8 byte
+        limits in shared core validation: payload JSON defaults to 262144 bytes
+        and headers JSON defaults to 32768 bytes. Oversized fields return
+        FIELD_TOO_LARGE without echoing content.
       security:
         - WorkerApiKey: []
         - AdminApiKey: []
@@ -108,6 +113,10 @@ paths:
   /queues/{queueName}/items/{itemId}/complete:
     post:
       summary: Complete a leased item
+      description: >
+        Completes a processing item when the worker still owns the item and
+        source lease. Completion result JSON is limited by the global core
+        maxResultBytes setting, default 262144 bytes.
       security:
         - WorkerApiKey: []
         - AdminApiKey: []
@@ -154,6 +163,10 @@ paths:
   /queues/{queueName}/items/{itemId}/fail:
     post:
       summary: Fail a leased item
+      description: >
+        Fails a processing item when the worker still owns the item and source
+        lease. errorType and errorMessage are limited by global core settings,
+        defaulting to 256 and 8192 UTF-8 bytes.
       security:
         - WorkerApiKey: []
         - AdminApiKey: []
@@ -746,6 +759,15 @@ components:
                 sourceId: "customer-123"
                 itemId: "00000000-0000-0000-0000-000000000001"
                 details: {}
+            fieldTooLarge:
+              value:
+                errorCode: "FIELD_TOO_LARGE"
+                message: "payload exceeds configured size limit"
+                queueName: "wf.commands"
+                fieldName: "payload"
+                maxBytes: 262144
+                actualBytes: 300112
+                details: {}
     Unauthorized:
       description: Missing or invalid bearer token
       content:
@@ -814,7 +836,10 @@ components:
         itemType: { type: string }
         idempotencyKey: { type: string, nullable: true }
         payload: { type: object, additionalProperties: true }
-        headers: { type: object, additionalProperties: true }
+        headers:
+          type: object
+          additionalProperties: true
+          description: Server default limit is 32768 UTF-8 bytes after compact JSON serialization.
         availableAt: { type: string, format: date-time, nullable: true }
         maxAttempts: { type: integer, nullable: true }
     EnqueueResponse:
@@ -861,7 +886,10 @@ components:
       properties:
         workerId: { type: string }
         leaseId: { type: string, format: uuid }
-        result: { type: object, additionalProperties: true }
+        result:
+          type: object
+          additionalProperties: true
+          description: Server default limit is 262144 UTF-8 bytes after compact JSON serialization.
     FailRequest:
       type: object
       required: [workerId, leaseId, retryable]
@@ -869,8 +897,12 @@ components:
         workerId: { type: string }
         leaseId: { type: string, format: uuid }
         retryable: { type: boolean }
-        errorType: { type: string }
-        errorMessage: { type: string }
+        errorType:
+          type: string
+          description: Server default limit is 256 UTF-8 bytes.
+        errorMessage:
+          type: string
+          description: Server default limit is 8192 UTF-8 bytes.
         backoffSeconds: { type: integer, nullable: true }
     HeartbeatRequest:
       type: object
@@ -1020,6 +1052,7 @@ components:
         reason:
           type: string
           nullable: true
+          description: Server default limit is 2048 UTF-8 bytes.
     RetentionPurgeResponse:
       type: object
       required: [queueName, dryRun, matched, deleted]
@@ -1036,6 +1069,7 @@ components:
           type: string
           enum:
             - VALIDATION_ERROR
+            - FIELD_TOO_LARGE
             - ITEM_NOT_FOUND
             - SOURCE_NOT_FOUND
             - SOURCE_BLOCKED
@@ -1051,4 +1085,24 @@ components:
         queueName: { type: string, nullable: true }
         sourceId: { type: string, nullable: true }
         itemId: { type: string, format: uuid, nullable: true }
+        fieldName:
+          type: string
+          nullable: true
+          description: Present for FIELD_TOO_LARGE responses.
+          enum:
+            - payload
+            - headers
+            - result
+            - errorType
+            - errorMessage
+            - adminReason
+            - adminMetadata
+        maxBytes:
+          type: integer
+          nullable: true
+          description: Configured maximum UTF-8 byte length for FIELD_TOO_LARGE responses.
+        actualBytes:
+          type: integer
+          nullable: true
+          description: Measured UTF-8 byte length for FIELD_TOO_LARGE responses.
         details: { type: object, additionalProperties: true }

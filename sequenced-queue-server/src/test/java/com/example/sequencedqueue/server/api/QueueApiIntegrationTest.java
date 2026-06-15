@@ -31,6 +31,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/**
+ * Test coverage for QueueApiIntegrationTest.
+ */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class QueueApiIntegrationTest {
@@ -60,6 +63,9 @@ class QueueApiIntegrationTest {
         execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
     }
 
+    /**
+     * Verifies rest enqueue then claim then complete.
+     */
     @Test
     void restEnqueueThenClaimThenComplete() {
         UUID itemId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
@@ -72,6 +78,9 @@ class QueueApiIntegrationTest {
         assertEquals("succeeded", complete.getBody().get("status"));
     }
 
+    /**
+     * Verifies rest wrong worker cannot complete.
+     */
     @Test
     void restWrongWorkerCannotComplete() {
         UUID itemId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
@@ -82,6 +91,9 @@ class QueueApiIntegrationTest {
         assertEquals(HttpStatus.CONFLICT, complete.getStatusCode());
     }
 
+    /**
+     * Verifies rest wrong lease cannot complete.
+     */
     @Test
     void restWrongLeaseCannotComplete() {
         UUID itemId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
@@ -92,6 +104,9 @@ class QueueApiIntegrationTest {
         assertEquals(HttpStatus.CONFLICT, complete.getStatusCode());
     }
 
+    /**
+     * Verifies rest heartbeat after expiry fails.
+     */
     @Test
     void restHeartbeatAfterExpiryFails() throws Exception {
         enqueue("source-1", 5);
@@ -104,6 +119,9 @@ class QueueApiIntegrationTest {
         assertEquals(HttpStatus.CONFLICT, heartbeat.getStatusCode());
     }
 
+    /**
+     * Verifies rest dead lettered head blocks later item.
+     */
     @Test
     void restDeadLetteredHeadBlocksLaterItem() {
         enqueue("source-1", 1);
@@ -119,6 +137,9 @@ class QueueApiIntegrationTest {
         assertTrue(((List<?>) secondClaim.get("items")).isEmpty());
     }
 
+    /**
+     * Verifies rest admin skip dead lettered head unblocks source.
+     */
     @Test
     void restAdminSkipDeadLetteredHeadUnblocksSource() {
         UUID firstId = UUID.fromString((String) enqueue("source-1", 1).getBody().get("itemId"));
@@ -134,6 +155,9 @@ class QueueApiIntegrationTest {
         assertFalse(((List<?>) nextClaim.get("items")).isEmpty());
     }
 
+    /**
+     * Verifies admin inspection endpoints expose dead letter blocked source items item detail and audit.
+     */
     @Test
     void adminInspectionEndpointsExposeDeadLetterBlockedSourceItemsItemDetailAndAudit() {
         UUID firstId = UUID.fromString((String) enqueue("source-1", 1).getBody().get("itemId"));
@@ -170,6 +194,9 @@ class QueueApiIntegrationTest {
         assertEquals("skipped", audit.getBody()[0].get("newStatus"));
     }
 
+    /**
+     * Verifies admin retention dry run counts without deleting.
+     */
     @Test
     void adminRetentionDryRunCountsWithoutDeleting() throws Exception {
         oldItem("retention-dry-run", "succeeded");
@@ -187,6 +214,9 @@ class QueueApiIntegrationTest {
         assertEquals(0, countWhere("queue_admin_audit", "operation = 'retention_purge'"));
     }
 
+    /**
+     * Verifies admin retention purge deletes at most limit.
+     */
     @Test
     void adminRetentionPurgeDeletesAtMostLimit() throws Exception {
         oldItem("retention-limit-1", "succeeded");
@@ -204,6 +234,9 @@ class QueueApiIntegrationTest {
         assertEquals(1, countWhere("queue_item", "status = 'succeeded'"));
     }
 
+    /**
+     * Verifies admin retention purge deletes only eligible terminal rows and writes audit.
+     */
     @Test
     void adminRetentionPurgeDeletesOnlyEligibleTerminalRowsAndWritesAudit() throws Exception {
         oldItem("retention-succeeded", "succeeded");
@@ -232,6 +265,9 @@ class QueueApiIntegrationTest {
         assertEquals(1, countWhere("queue_admin_audit", "operation = 'retention_purge' AND reason = 'cleanup'"));
     }
 
+    /**
+     * Verifies admin retention rejects blocking statuses.
+     */
     @Test
     void adminRetentionRejectsBlockingStatuses() {
         ResponseEntity<Map> purge = post("/admin/queues/" + QUEUE + "/retention/purge",
@@ -243,6 +279,9 @@ class QueueApiIntegrationTest {
         assertEquals("VALIDATION_ERROR", purge.getBody().get("errorCode"));
     }
 
+    /**
+     * Verifies admin retention rejects zero limit.
+     */
     @Test
     void adminRetentionRejectsZeroLimit() {
         ResponseEntity<Map> purge = post("/admin/queues/" + QUEUE + "/retention/purge",
@@ -254,6 +293,9 @@ class QueueApiIntegrationTest {
         assertEquals("VALIDATION_ERROR", purge.getBody().get("errorCode"));
     }
 
+    /**
+     * Verifies lifecycle operations do not write admin audit.
+     */
     @Test
     void lifecycleOperationsDoNotWriteAdminAudit() throws Exception {
         UUID itemId = UUID.fromString((String) enqueue("audit-complete", 5).getBody().get("itemId"));
@@ -268,6 +310,9 @@ class QueueApiIntegrationTest {
         assertEquals(0, countWhere("queue_admin_audit", "true"));
     }
 
+    /**
+     * Verifies actuator health includes queue details.
+     */
     @Test
     void actuatorHealthIncludesQueueDetails() {
         ResponseEntity<Map> health = get("/actuator/health", Map.class, new HttpHeaders());
@@ -287,6 +332,9 @@ class QueueApiIntegrationTest {
         assertEquals(true, details.get("recoveryEnabled"));
     }
 
+    /**
+     * Verifies metrics endpoint exposes counters and gauges.
+     */
     @Test
     void metricsEndpointExposesCountersAndGauges() {
         UUID itemId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
@@ -302,6 +350,9 @@ class QueueApiIntegrationTest {
         assertEquals(1.0, metricValue("queue.sources.idle"));
     }
 
+    /**
+     * Verifies structured error responses are stable.
+     */
     @Test
     void structuredErrorResponsesAreStable() {
         UUID itemId = UUID.fromString((String) enqueue("source-1", 5).getBody().get("itemId"));
@@ -325,6 +376,9 @@ class QueueApiIntegrationTest {
         assertEquals("VALIDATION_ERROR", invalidRequest.getBody().get("errorCode"));
     }
 
+    /**
+     * Verifies payload over limit returns structured safe validation error.
+     */
     @Test
     void payloadOverLimitReturnsStructuredSafeValidationError() {
         String secretPayload = "secret-payload-" + "x".repeat(270_000);
@@ -334,12 +388,18 @@ class QueueApiIntegrationTest {
             Map.class);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
-        assertEquals("payload exceeds max bytes", response.getBody().get("message"));
+        assertEquals("FIELD_TOO_LARGE", response.getBody().get("errorCode"));
+        assertEquals("payload exceeds configured size limit", response.getBody().get("message"));
+        assertEquals("payload", response.getBody().get("fieldName"));
+        assertEquals(262144, ((Number) response.getBody().get("maxBytes")).intValue());
+        assertTrue(((Number) response.getBody().get("actualBytes")).intValue() > 262144);
         assertFalse(response.getBody().toString().contains(secretPayload));
         assertFalse(response.getBody().toString().contains("Authorization"));
     }
 
+    /**
+     * Verifies headers over limit returns structured safe validation error.
+     */
     @Test
     void headersOverLimitReturnsStructuredSafeValidationError() {
         String secretHeader = "secret-header-" + "x".repeat(70_000);
@@ -349,11 +409,16 @@ class QueueApiIntegrationTest {
             Map.class);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
-        assertEquals("headers exceeds max bytes", response.getBody().get("message"));
+        assertEquals("FIELD_TOO_LARGE", response.getBody().get("errorCode"));
+        assertEquals("headers", response.getBody().get("fieldName"));
+        assertEquals(32768, ((Number) response.getBody().get("maxBytes")).intValue());
+        assertTrue(((Number) response.getBody().get("actualBytes")).intValue() > 32768);
         assertFalse(response.getBody().toString().contains(secretHeader));
     }
 
+    /**
+     * Verifies fail error message over limit returns structured validation error.
+     */
     @Test
     void failErrorMessageOverLimitReturnsStructuredValidationError() {
         UUID itemId = UUID.fromString((String) enqueue("limit-error-message", 5).getBody().get("itemId"));
@@ -365,11 +430,60 @@ class QueueApiIntegrationTest {
             Map.class);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
-        assertEquals("errorMessage exceeds max bytes", response.getBody().get("message"));
+        assertEquals("FIELD_TOO_LARGE", response.getBody().get("errorCode"));
+        assertEquals("errorMessage", response.getBody().get("fieldName"));
+        assertEquals(8192, ((Number) response.getBody().get("maxBytes")).intValue());
+        assertTrue(((Number) response.getBody().get("actualBytes")).intValue() > 8192);
         assertFalse(response.getBody().toString().contains(secretError));
     }
 
+    /**
+     * Verifies complete result over limit returns structured validation error.
+     */
+    @Test
+    void completeResultOverLimitReturnsStructuredValidationError() {
+        UUID itemId = UUID.fromString((String) enqueue("limit-result", 5).getBody().get("itemId"));
+        Map<String, Object> claim = claim("worker-1").getBody();
+        String secretResult = "secret-result-" + "x".repeat(270_000);
+
+        ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items/" + itemId + "/complete",
+            Map.of("workerId", "worker-1", "leaseId", claim.get("leaseId"), "result", Map.of("secret", secretResult)),
+            Map.class);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("FIELD_TOO_LARGE", response.getBody().get("errorCode"));
+        assertEquals("result", response.getBody().get("fieldName"));
+        assertEquals(itemId.toString(), response.getBody().get("itemId"));
+        assertEquals(262144, ((Number) response.getBody().get("maxBytes")).intValue());
+        assertTrue(((Number) response.getBody().get("actualBytes")).intValue() > 262144);
+        assertFalse(response.getBody().toString().contains(secretResult));
+    }
+
+    /**
+     * Verifies fail error type over limit returns structured validation error.
+     */
+    @Test
+    void failErrorTypeOverLimitReturnsStructuredValidationError() {
+        UUID itemId = UUID.fromString((String) enqueue("limit-error-type", 5).getBody().get("itemId"));
+        Map<String, Object> claim = claim("worker-1").getBody();
+        String secretType = "SECRET_" + "X".repeat(300);
+
+        ResponseEntity<Map> response = post("/queues/" + QUEUE + "/items/" + itemId + "/fail",
+            Map.of("workerId", "worker-1", "leaseId", claim.get("leaseId"), "retryable", false, "errorType", secretType, "errorMessage", "safe"),
+            Map.class);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("FIELD_TOO_LARGE", response.getBody().get("errorCode"));
+        assertEquals("errorType", response.getBody().get("fieldName"));
+        assertEquals(itemId.toString(), response.getBody().get("itemId"));
+        assertEquals(256, ((Number) response.getBody().get("maxBytes")).intValue());
+        assertTrue(((Number) response.getBody().get("actualBytes")).intValue() > 256);
+        assertFalse(response.getBody().toString().contains(secretType));
+    }
+
+    /**
+     * Verifies retention reason over limit returns structured validation error.
+     */
     @Test
     void retentionReasonOverLimitReturnsStructuredValidationError() {
         String secretReason = "secret-reason-" + "x".repeat(3_000);
@@ -380,11 +494,16 @@ class QueueApiIntegrationTest {
             adminHeaders());
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals("VALIDATION_ERROR", response.getBody().get("errorCode"));
-        assertEquals("admin reason exceeds max bytes", response.getBody().get("message"));
+        assertEquals("FIELD_TOO_LARGE", response.getBody().get("errorCode"));
+        assertEquals("adminReason", response.getBody().get("fieldName"));
+        assertEquals(2048, ((Number) response.getBody().get("maxBytes")).intValue());
+        assertTrue(((Number) response.getBody().get("actualBytes")).intValue() > 2048);
         assertFalse(response.getBody().toString().contains(secretReason));
     }
 
+    /**
+     * Verifies claim lease seconds over max returns structured validation error.
+     */
     @Test
     void claimLeaseSecondsOverMaxReturnsStructuredValidationError() {
         ResponseEntity<Map> response = post("/queues/" + QUEUE + "/claims",
@@ -396,6 +515,9 @@ class QueueApiIntegrationTest {
         assertEquals("leaseSeconds must be <= 600", response.getBody().get("message"));
     }
 
+    /**
+     * Verifies blocked source error response includes context.
+     */
     @Test
     void blockedSourceErrorResponseIncludesContext() {
         UUID itemId = UUID.fromString((String) enqueue("blocked-source", 1).getBody().get("itemId"));
@@ -411,6 +533,9 @@ class QueueApiIntegrationTest {
         assertEquals(itemId.toString(), blocked.getBody().get("itemId"));
     }
 
+    /**
+     * Verifies metrics endpoint exposes operational counters.
+     */
     @Test
     void metricsEndpointExposesOperationalCounters() throws Exception {
         double failuresBefore = metricValue("queue.failures.total");

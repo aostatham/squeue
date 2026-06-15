@@ -15,9 +15,14 @@ import java.util.UUID;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+/**
+ * Default core implementation that owns queue validation, sequencing, locking, and state transitions.
+ */
 public class DefaultQueueService implements QueueOperations {
+    /** Jackson type token for persisted JSON objects. */
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
+    /** Terminal statuses that are safe for manual retention purge. */
     private static final EnumSet<ItemStatus> RETENTION_PURGE_STATUSES = EnumSet.of(
         ItemStatus.succeeded,
         ItemStatus.cancelled,
@@ -25,13 +30,22 @@ public class DefaultQueueService implements QueueOperations {
         ItemStatus.failed
     );
 
+    /** Repository used for PostgreSQL state changes. */
     private final QueueRepository repository;
+    /** Transaction boundary for each queue operation. */
     private final TransactionRunner transactions;
+    /** Retry delay policy for retryable failures and lease recovery. */
     private final RetryPolicy retryPolicy;
+    /** JSON mapper used for persistence serialization and deserialization. */
     private final ObjectMapper objectMapper;
+    /** Clock used to make time-dependent behavior testable. */
     private final Clock clock;
+    /** Global queue settings and limits. */
     private final QueueSettings settings;
 
+    /**
+     * Creates a service with legacy lease and attempt settings plus other defaults.
+     */
     public DefaultQueueService(QueueRepository repository, TransactionRunner transactions, RetryPolicy retryPolicy, ObjectMapper objectMapper, Clock clock, int defaultLeaseSeconds, int defaultMaxAttempts) {
         this(repository, transactions, retryPolicy, objectMapper, clock, new QueueSettings(
             defaultLeaseSeconds,
@@ -45,6 +59,9 @@ public class DefaultQueueService implements QueueOperations {
         ));
     }
 
+    /**
+     * Creates a service with explicit dependencies and global settings.
+     */
     public DefaultQueueService(QueueRepository repository, TransactionRunner transactions, RetryPolicy retryPolicy, ObjectMapper objectMapper, Clock clock, QueueSettings settings) {
         this.repository = repository;
         this.transactions = transactions;
@@ -54,6 +71,9 @@ public class DefaultQueueService implements QueueOperations {
         this.settings = settings;
     }
 
+    /**
+     * Enqueues a request and resolves concurrent idempotency conflicts to the existing item.
+     */
     @Override
     public EnqueueResponse enqueue(String queueName, EnqueueRequest request) {
         requireRequest(request);
@@ -69,29 +89,43 @@ public class DefaultQueueService implements QueueOperations {
         }
     }
 
+    /**
+     * Claims work inside one transaction.
+     */
     @Override
     public ClaimResponse claim(String queueName, ClaimRequest request) {
         requireRequest(request);
         return transactions.inTransaction(() -> claimInTransaction(queueName, request));
     }
 
+    /**
+     * Completes a leased item after validating both item and source lease ownership.
+     */
     @Override
     public ItemResponse complete(String queueName, UUID itemId, CompleteRequest request) {
         requireRequest(request);
+        String resultJson = writeJson(defaultMap(request.result()));
+        requireMaxBytes(resultJson, settings.maxResultBytes(), "result", queueName, itemId);
         return transactions.inTransaction(() -> {
             QueueItemRow item = verifyLease(queueName, itemId, request.workerId(), request.leaseId());
-            QueueItemRow completed = repository.complete(item.itemId(), writeJson(defaultMap(request.result())), now());
+            QueueItemRow completed = repository.complete(item.itemId(), resultJson, now());
             repository.releaseSource(item.queueName(), item.sourceId(), now());
             return toItemResponse(completed);
         });
     }
 
+    /**
+     * Fails a leased item and either releases or blocks the source according to the resulting status.
+     */
     @Override
     public ItemResponse fail(String queueName, UUID itemId, FailRequest request) {
         requireRequest(request);
         return transactions.inTransaction(() -> failInTransaction(queueName, itemId, request));
     }
 
+    /**
+     * Extends a lease only when the worker still owns it.
+     */
     @Override
     public void heartbeat(String queueName, UUID leaseId, HeartbeatRequest request) {
         requireRequest(request);
@@ -108,6 +142,9 @@ public class DefaultQueueService implements QueueOperations {
         });
     }
 
+    /**
+     * Loads a single item by ID.
+     */
     @Override
     public ItemResponse getItem(String queueName, UUID itemId) {
         return transactions.inTransaction(() -> repository.findItem(queueName, itemId)
@@ -115,31 +152,49 @@ public class DefaultQueueService implements QueueOperations {
             .orElseThrow(() -> new QueueException(QueueErrorCode.ITEM_NOT_FOUND, QueueException.NOT_FOUND, "item not found").withContext(queueName, null, itemId)));
     }
 
+    /**
+     * Lists items for one source.
+     */
     @Override
     public List<ItemResponse> getSourceItems(String queueName, String sourceId) {
         return transactions.inTransaction(() -> repository.listSourceItems(queueName, sourceId).stream().map(this::toItemResponse).toList());
     }
 
+    /**
+     * Lists dead-lettered items with normalized pagination.
+     */
     @Override
     public List<ItemResponse> deadLetteredItems(String queueName, int limit, int offset) {
         return transactions.inTransaction(() -> repository.listDeadLettered(queueName, normalizeLimit(limit), normalizeOffset(offset)).stream().map(this::toItemResponse).toList());
     }
 
+    /**
+     * Lists blocked sources.
+     */
     @Override
     public List<SourceResponse> blockedSources(String queueName) {
         return transactions.inTransaction(() -> repository.blockedSources(queueName).stream().map(this::toSourceResponse).toList());
     }
 
+    /**
+     * Lists blocked sources with head-item context.
+     */
     @Override
     public List<BlockedSourceResponse> inspectBlockedSources(String queueName, int limit, int offset) {
         return transactions.inTransaction(() -> repository.inspectBlockedSources(queueName, normalizeLimit(limit), normalizeOffset(offset)).stream().map(this::toBlockedSourceResponse).toList());
     }
 
+    /**
+     * Unblocks a source without audit actor details.
+     */
     @Override
     public SourceResponse unblockSource(String queueName, String sourceId) {
         return unblockSource(queueName, sourceId, null, null);
     }
 
+    /**
+     * Unblocks a source only when no blocking head item remains, then records audit.
+     */
     @Override
     public SourceResponse unblockSource(String queueName, String sourceId, String actorId, String reason) {
         validateAdminReason(reason, queueName);
@@ -160,41 +215,65 @@ public class DefaultQueueService implements QueueOperations {
         });
     }
 
+    /**
+     * Retries a dead-lettered head item without audit actor details.
+     */
     @Override
     public ItemResponse retry(String queueName, UUID itemId) {
         return retry(queueName, itemId, null, null);
     }
 
+    /**
+     * Retries a dead-lettered head item and records audit.
+     */
     @Override
     public ItemResponse retry(String queueName, UUID itemId, String actorId, String reason) {
         return transactions.inTransaction(() -> adminRepair(queueName, itemId, ItemStatus.retry_wait, List.of(ItemStatus.dead_lettered), "retry", actorId, reason));
     }
 
+    /**
+     * Skips an allowed head item without audit actor details.
+     */
     @Override
     public ItemResponse skip(String queueName, UUID itemId) {
         return skip(queueName, itemId, null, null);
     }
 
+    /**
+     * Skips an allowed head item and records audit.
+     */
     @Override
     public ItemResponse skip(String queueName, UUID itemId, String actorId, String reason) {
         return transactions.inTransaction(() -> adminRepair(queueName, itemId, ItemStatus.skipped, List.of(ItemStatus.pending, ItemStatus.retry_wait, ItemStatus.dead_lettered), "skip", actorId, reason));
     }
 
+    /**
+     * Cancels an allowed head item without audit actor details.
+     */
     @Override
     public ItemResponse cancel(String queueName, UUID itemId) {
         return cancel(queueName, itemId, null, null);
     }
 
+    /**
+     * Cancels an allowed head item and records audit.
+     */
     @Override
     public ItemResponse cancel(String queueName, UUID itemId, String actorId, String reason) {
         return transactions.inTransaction(() -> adminRepair(queueName, itemId, ItemStatus.cancelled, List.of(ItemStatus.pending, ItemStatus.retry_wait, ItemStatus.dead_lettered), "cancel", actorId, reason));
     }
 
+    /**
+     * Runs retention purge without explicit actor details.
+     */
     @Override
     public RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request) {
         return purgeRetention(queueName, request, null);
     }
 
+    /**
+     * Runs bounded manual retention purge and audits real deletes transactionally.
+     */
     @Override
     public RetentionPurgeResponse purgeRetention(String queueName, RetentionPurgeRequest request, String actorId) {
         requireRequest(request);
@@ -223,11 +302,17 @@ public class DefaultQueueService implements QueueOperations {
         });
     }
 
+    /**
+     * Lists admin audit rows with normalized pagination.
+     */
     @Override
     public List<AdminAuditResponse> adminAudit(String queueName, int limit, int offset) {
         return transactions.inTransaction(() -> repository.listAdminAudit(queueName, normalizeLimit(limit), normalizeOffset(offset)).stream().map(this::toAdminAuditResponse).toList());
     }
 
+    /**
+     * Recovers expired processing leases when source/item lease identity is safe to mutate.
+     */
     @Override
     public int recoverExpiredLeases() {
         return transactions.inTransaction(() -> {
@@ -242,16 +327,25 @@ public class DefaultQueueService implements QueueOperations {
         });
     }
 
+    /**
+     * Reads schema compatibility information.
+     */
     @Override
     public QueueSchemaInfo getSchemaInfo() {
         return transactions.inTransaction(repository::getSchemaInfo);
     }
 
+    /**
+     * Reads aggregate queue/source metrics.
+     */
     @Override
     public QueueMetricsSnapshot metricsSnapshot() {
         return transactions.inTransaction(repository::metricsSnapshot);
     }
 
+    /**
+     * Performs enqueue validation, source-first locking, sequence allocation, and insert.
+     */
     private EnqueueResponse enqueueInTransaction(String queueName, EnqueueRequest request) {
         requireText(queueName, "queueName");
         requireText(request.sourceId(), "sourceId");
@@ -283,6 +377,9 @@ public class DefaultQueueService implements QueueOperations {
         return toEnqueueResponse(item);
     }
 
+    /**
+     * Performs claim validation and source-aware head-item claim.
+     */
     private ClaimResponse claimInTransaction(String queueName, ClaimRequest request) {
         requireText(queueName, "queueName");
         requireText(request.workerId(), "workerId");
@@ -308,11 +405,15 @@ public class DefaultQueueService implements QueueOperations {
             .orElseGet(ClaimResponse::empty);
     }
 
+    /**
+     * Applies failure semantics after lease verification.
+     */
     private ItemResponse failInTransaction(String queueName, UUID itemId, FailRequest request) {
         if (request.backoffSeconds() != null && request.backoffSeconds() < 0) {
             throw new QueueException(QueueException.BAD_REQUEST, "backoffSeconds must be >= 0");
         }
-        requireMaxBytes(request.errorMessage(), settings.maxErrorMessageBytes(), "errorMessage", queueName);
+        requireMaxBytes(request.errorType(), settings.maxErrorTypeBytes(), "errorType", queueName, itemId);
+        requireMaxBytes(request.errorMessage(), settings.maxErrorMessageBytes(), "errorMessage", queueName, itemId);
         QueueItemRow item = verifyLease(queueName, itemId, request.workerId(), request.leaseId());
         OffsetDateTime now = now();
         boolean exhausted = item.attemptCount() >= item.maxAttempts();
@@ -338,6 +439,9 @@ public class DefaultQueueService implements QueueOperations {
         return toItemResponse(failed);
     }
 
+    /**
+     * Verifies that the item and source are both leased to the supplied worker/lease identity.
+     */
     private QueueItemRow verifyLease(String queueName, UUID itemId, String workerId, UUID leaseId) {
         requireText(workerId, "workerId");
         if (leaseId == null) {
@@ -365,6 +469,9 @@ public class DefaultQueueService implements QueueOperations {
         return item;
     }
 
+    /**
+     * Applies source-first admin repair for retry, skip, and cancel.
+     */
     private ItemResponse adminRepair(String queueName, UUID itemId, ItemStatus targetStatus, List<ItemStatus> allowedStatuses, String operation, String actorId, String reason) {
         validateAdminReason(reason, queueName);
         QueueItemRow candidate = repository.findItem(queueName, itemId)
@@ -379,6 +486,9 @@ public class DefaultQueueService implements QueueOperations {
         return toItemResponse(updated);
     }
 
+    /**
+     * Revalidates admin repair preconditions after source and item locks are held.
+     */
     private void ensureAdminRepairAllowed(QueueItemRow item, QueueItemRow candidate, SourceStateRow source, List<ItemStatus> allowedStatuses) {
         if (!item.sourceId().equals(candidate.sourceId())) {
             throw new QueueException(QueueErrorCode.QUEUE_CONFLICT, QueueException.CONFLICT, "item source changed while locking").withContext(item.queueName(), item.sourceId(), item.itemId());
@@ -396,6 +506,9 @@ public class DefaultQueueService implements QueueOperations {
         }
     }
 
+    /**
+     * Recovers one expired item only when source state matches the item lease or is safely idle.
+     */
     private boolean recoverExpiredItem(QueueItemRow candidate, OffsetDateTime now) {
         SourceStateRow source = repository.lockSource(candidate.queueName(), candidate.sourceId());
         QueueItemRow item = repository.lockItem(candidate.queueName(), candidate.itemId());
@@ -428,42 +541,74 @@ public class DefaultQueueService implements QueueOperations {
         return true;
     }
 
+    /**
+     * Maps an item row to the enqueue response contract.
+     */
     private EnqueueResponse toEnqueueResponse(QueueItemRow item) {
         return new EnqueueResponse(item.itemId(), item.queueName(), item.sourceId(), item.sequenceNo(), item.status().name());
     }
 
+    /**
+     * Maps an item row to the public item response contract.
+     */
     private ItemResponse toItemResponse(QueueItemRow item) {
         return new ItemResponse(item.itemId(), item.queueName(), item.sourceId(), item.sequenceNo(), item.itemType(), readJson(item.payloadJson()), readJson(item.headersJson()), item.status().name(), item.availableAt(), item.claimedBy(), item.leaseId(), item.leaseUntil(), item.attemptCount(), item.maxAttempts(), item.idempotencyKey(), item.lastErrorType(), item.lastErrorMessage(), readJson(item.resultJson()), item.createdAt(), item.updatedAt());
     }
 
+    /**
+     * Maps a source row to the public source response contract.
+     */
     private SourceResponse toSourceResponse(SourceStateRow source) {
         return new SourceResponse(source.queueName(), source.sourceId(), source.nextSequenceNo(), source.status().name(), source.leasedBy(), source.leaseId(), source.leaseUntil(), source.updatedAt());
     }
 
+    /**
+     * Maps a blocked source row to the admin inspection response.
+     */
     private BlockedSourceResponse toBlockedSourceResponse(BlockedSourceRow source) {
         return new BlockedSourceResponse(source.queueName(), source.sourceId(), source.status().name(), source.leasedBy(), source.leaseUntil(), source.headItemId(), source.headItemStatus() == null ? null : source.headItemStatus().name(), source.updatedAt());
     }
 
+    /**
+     * Maps an audit row to the admin audit response.
+     */
     private AdminAuditResponse toAdminAuditResponse(AdminAuditRow audit) {
         return new AdminAuditResponse(audit.auditId(), audit.occurredAt(), audit.actorId(), audit.operation(), audit.queueName(), audit.sourceId(), audit.itemId(), audit.previousStatus(), audit.newStatus(), audit.reason(), readJson(audit.metadataJson()));
     }
 
+    /**
+     * Writes an admin audit record using compact JSON metadata.
+     */
     private void insertAudit(String actorId, String operation, String queueName, String sourceId, UUID itemId, String previousStatus, String newStatus, String reason, Map<String, Object> metadata) {
-        repository.insertAdminAudit(UUID.randomUUID(), now(), blankToNull(actorId), operation, queueName, sourceId, itemId, previousStatus, newStatus, blankToNull(reason), writeJson(defaultMap(metadata)));
+        String metadataJson = writeJson(defaultMap(metadata));
+        requireMaxBytes(metadataJson, settings.maxAdminMetadataBytes(), "adminMetadata", queueName, itemId);
+        repository.insertAdminAudit(UUID.randomUUID(), now(), blankToNull(actorId), operation, queueName, sourceId, itemId, previousStatus, newStatus, blankToNull(reason), metadataJson);
     }
 
+    /**
+     * Returns the current time from the injected clock.
+     */
     private OffsetDateTime now() {
         return OffsetDateTime.now(clock);
     }
 
+    /**
+     * Normalizes nullable JSON maps to empty objects.
+     */
     private Map<String, Object> defaultMap(Map<String, Object> value) {
         return value == null ? Map.of() : value;
     }
 
+    /**
+     * Converts blank strings to null for optional persistence fields.
+     */
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
     }
 
+    /**
+     * Validates and caps read-side pagination limits.
+     */
     private int normalizeLimit(int limit) {
         if (limit < 1) {
             throw new QueueException(QueueException.BAD_REQUEST, "limit must be >= 1");
@@ -471,6 +616,9 @@ public class DefaultQueueService implements QueueOperations {
         return Math.min(limit, 500);
     }
 
+    /**
+     * Validates read-side pagination offsets.
+     */
     private int normalizeOffset(int offset) {
         if (offset < 0) {
             throw new QueueException(QueueException.BAD_REQUEST, "offset must be >= 0");
@@ -478,28 +626,53 @@ public class DefaultQueueService implements QueueOperations {
         return offset;
     }
 
+    /**
+     * Requires a non-blank text field.
+     */
     private void requireText(String value, String field) {
         if (value == null || value.isBlank()) {
             throw new QueueException(QueueException.BAD_REQUEST, field + " is required");
         }
     }
 
+    /**
+     * Requires a non-null request body.
+     */
     private void requireRequest(Object request) {
         if (request == null) {
             throw new QueueException(QueueException.BAD_REQUEST, "request body is required");
         }
     }
 
+    /**
+     * Requires a string value to fit within a configured UTF-8 byte limit.
+     */
     private void requireMaxBytes(String value, int maxBytes, String field, String queueName) {
-        if (value != null && value.getBytes(StandardCharsets.UTF_8).length > maxBytes) {
-            throw new QueueException(QueueException.BAD_REQUEST, field + " exceeds max bytes").withQueueName(queueName);
+        requireMaxBytes(value, maxBytes, field, queueName, null);
+    }
+
+    /**
+     * Requires a string value to fit within a configured UTF-8 byte limit and carries item context.
+     */
+    private void requireMaxBytes(String value, int maxBytes, String field, String queueName, UUID itemId) {
+        if (value != null) {
+            int actualBytes = value.getBytes(StandardCharsets.UTF_8).length;
+            if (actualBytes > maxBytes) {
+                throw new QueueFieldTooLargeException(field, maxBytes, actualBytes).withContext(queueName, null, itemId);
+            }
         }
     }
 
+    /**
+     * Validates admin audit reason size.
+     */
     private void validateAdminReason(String reason, String queueName) {
-        requireMaxBytes(reason, settings.maxAdminReasonBytes(), "admin reason", queueName);
+        requireMaxBytes(reason, settings.maxAdminReasonBytes(), "adminReason", queueName);
     }
 
+    /**
+     * Parses and validates retention purge statuses.
+     */
     private List<ItemStatus> retentionStatuses(List<String> requestedStatuses, String queueName) {
         if (requestedStatuses == null || requestedStatuses.isEmpty()) {
             throw new QueueException(QueueException.BAD_REQUEST, "statuses is required").withQueueName(queueName);
@@ -510,6 +683,9 @@ public class DefaultQueueService implements QueueOperations {
             .toList();
     }
 
+    /**
+     * Converts one retention status string and rejects non-purgeable statuses.
+     */
     private ItemStatus retentionStatus(String status, String queueName) {
         if (status == null || status.isBlank()) {
             throw new QueueException(QueueException.BAD_REQUEST, "status is required").withQueueName(queueName);
@@ -526,6 +702,9 @@ public class DefaultQueueService implements QueueOperations {
         return itemStatus;
     }
 
+    /**
+     * Applies default and maximum retention purge limits.
+     */
     private int retentionLimit(Integer requestedLimit, String queueName) {
         int limit = requestedLimit == null ? 1000 : requestedLimit;
         if (limit < 1) {
@@ -537,6 +716,9 @@ public class DefaultQueueService implements QueueOperations {
         return limit;
     }
 
+    /**
+     * Serializes a JSON-compatible map for persistence.
+     */
     private String writeJson(Map<String, Object> value) {
         try {
             return objectMapper.writeValueAsString(value == null ? Map.of() : value);
@@ -545,6 +727,9 @@ public class DefaultQueueService implements QueueOperations {
         }
     }
 
+    /**
+     * Deserializes persisted JSON into a map response value.
+     */
     private Map<String, Object> readJson(String value) {
         if (value == null || value.isBlank()) {
             return Map.of();
