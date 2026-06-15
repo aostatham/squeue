@@ -6,7 +6,7 @@ This file tracks deliberate simplification deferrals. It is not a product roadma
 
 `ClaimItem` is used in Java REST client, trusted direct Java client, core DTOs, server DTOs, and OpenAPI. `ClaimedItem` is a clearer canonical name, but renaming it now would create release-candidate API churn across Java and wire documentation.
 
-Decision: keep `ClaimItem` for `0.1.0-rc1`; reconsider a compatibility alias or rename before a stable 1.0 API.
+Decision: keep `ClaimItem` for `0.1.0`; reconsider a compatibility alias or rename before a stable 1.0 API.
 
 ## Example Module Layout
 
@@ -18,11 +18,11 @@ Decision: keep the split for now. Reconsider consolidation only if release packa
 
 OpenAPI remains checked in as YAML with drift tests against implemented routes and typed schema checks.
 
-Decision: keep checked-in YAML for the release candidate. Reconsider generated OpenAPI only if manual maintenance becomes the main source of drift.
+Decision: keep checked-in YAML for the MVP release. Reconsider generated OpenAPI only if manual maintenance becomes the main source of drift.
 
 ## Post-Go-Live Schema Migration Policy
 
-The current pre-release build has a single schema baseline: `V1`. Pre-release development migrations are collapsed into that baseline because there are no live production databases that require historical upgrades.
+The current MVP release has a single schema baseline: `V1`. Pre-release development migrations are collapsed into that baseline because there are no live production databases that require historical upgrades.
 
 After the product has a released schema used by real deployments, future schema changes must be delivered as additive versioned migrations.
 

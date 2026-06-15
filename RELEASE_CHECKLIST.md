@@ -1,6 +1,6 @@
 # Release Checklist
 
-Use this checklist from a clean checkout before tagging or publishing a release candidate.
+Use this checklist from a clean checkout before tagging or publishing a release.
 
 ## Required Verification
 
@@ -8,15 +8,20 @@ Docker must be available for the PostgreSQL/Testcontainers suites. A skipped Doc
 
 ```sh
 ./mvnw clean test
-./mvnw verify -Ppostgres-contract
-./mvnw verify -Pdeveloper-contract
 ./mvnw verify -Pfull-contract
-cd sequenced-queue-python-client && python -m pytest
+cd sequenced-queue-python-client
+python -m pytest
+cd ..
+docker build -t sequenced-queue-server:0.1.0 -f sequenced-queue-server/Dockerfile .
+docker run --rm sequenced-queue-server:0.1.0 --help
+find . -path "*/db/migration/*" -type f | sort
 ```
 
 ## Manual Checks
 
 - OpenAPI YAML parse passes.
+- Schema baseline remains `V1`.
+- No stale V2/V3/V4 schema references remain outside historical release notes or design-history context.
 - Java examples compile.
 - Python examples compile.
 - Docker-backed tests run with no skips.
@@ -24,15 +29,17 @@ cd sequenced-queue-python-client && python -m pytest
 - Direct Java client required schema version matches the latest Flyway migration.
 - README links to release, versioning, security, semantics, quickstart, and examples docs are valid.
 - Release notes are updated in `CHANGELOG.md`.
-- Maven and Python package versions match the intended release candidate.
+- Maven and Python package versions match the intended release.
 - Docker image build documentation is current.
 - Working tree is clean before tagging.
+- No force push is used.
+- Final tag is `v0.1.0`.
 
 ## Artifact Review
 
-- Maven group/artifact/version coordinates are final for the release candidate.
-- Python package name and version are final for the release candidate.
-- OpenAPI `info.version` matches the release candidate.
+- Maven group/artifact/version coordinates are final for the release.
+- Python package name and version are final for the release.
+- OpenAPI `info.version` matches the release.
 - License, SCM, project URL, developer, and organization metadata are either finalized before public publishing or explicitly treated as provisional.
 
 ## Non-Goals For This Release

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: sequenced-queue API
-  version: 0.1.0-rc1
+  version: 0.1.0
 paths:
   /queues/{queueName}/items:
     post:

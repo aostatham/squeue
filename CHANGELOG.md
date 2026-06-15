@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-15
+
+First MVP release of `sequenced-queue`.
+
+Includes:
+
+- PostgreSQL-backed durable source-ordered queue.
+- REST server.
+- Java REST client.
+- Python REST client.
+- Direct Java/PostgreSQL client for trusted internal deployments.
+- Shared core queue semantics.
+- Worker leases, heartbeat, retry/backoff, dead-letter blocking, and admin repair.
+- Operational baseline with health, metrics, and admin audit.
+- OpenAPI documentation.
+- Docker packaging.
+- Pre-release schema baseline `V1`.
+- Stage 3A global size limits and `FIELD_TOO_LARGE` error semantics.
+
+Guarantees:
+
+- Strict per-source ordering.
+- Parallel processing across different sources.
+- At-least-once delivery.
+
+Non-guarantees:
+
+- Exactly-once side effects.
+- Global ordering.
+- Pub/sub or broker replacement semantics.
+
 ## [0.1.0-rc3] - 2026-06-15
 
 - Includes Stage 3A global size limits for payloads, headers, completion results, error details, admin reasons, and admin metadata.

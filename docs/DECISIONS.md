@@ -132,7 +132,7 @@ Database transactions are used for enqueue, claim, complete, fail, heartbeat, re
 
 Status: Accepted.
 
-Direct Java schema compatibility is implemented using Flyway schema version lookup through `sequenced-queue-core`. For the current pre-release build, the direct Java client requires schema baseline `V1`.
+Direct Java schema compatibility is implemented using Flyway schema version lookup through `sequenced-queue-core`. For the current release, the direct Java client requires schema baseline `V1`.
 
 Trusted direct Java deployments may call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` to fail fast when the schema is missing or incompatible.
 

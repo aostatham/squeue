@@ -24,7 +24,7 @@ Project status:
 Stage 0 - Correctness Foundation: passed
 Stage 1 - Operational Readiness Baseline: passed
 Stage 2 - Developer Experience Baseline: passed
-Current focus - v0.1.0-rc1 release readiness
+Current release - v0.1.0 MVP
 ```
 
 ## Modules
@@ -105,7 +105,7 @@ For a runnable producer/worker walkthrough, see [Developer Quickstart](docs/deve
 Build the server image from the repository root:
 
 ```sh
-docker build -f sequenced-queue-server/Dockerfile -t sequenced-queue-server:0.1.0-rc1 .
+docker build -t sequenced-queue-server:0.1.0 -f sequenced-queue-server/Dockerfile .
 ```
 
 Run it against an existing PostgreSQL database:
@@ -117,7 +117,7 @@ docker run --rm -p 8080:8080 \
   -e SPRING_DATASOURCE_PASSWORD=sequenced_queue \
   -e SEQUENCED_QUEUE_API_KEY=replace-worker-key \
   -e SEQUENCED_QUEUE_ADMIN_API_KEY=replace-admin-key \
-  sequenced-queue-server:0.1.0-rc1
+  sequenced-queue-server:0.1.0
 ```
 
 The server also supports the local development aliases `DATABASE_URL`, `DATABASE_USERNAME`, and `DATABASE_PASSWORD` through `application.yml`; the `SPRING_DATASOURCE_*` names are the standard Spring Boot overrides.
@@ -248,7 +248,7 @@ List endpoints support `limit` and `offset`.
 
 The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
 
-The database must already have the `sequenced-queue-core` Flyway baseline applied. For the current pre-release build, the database schema baseline is `V1`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
+The database must already have the `sequenced-queue-core` Flyway baseline applied. For the current release, the database schema baseline is `V1`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
 
 Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, manual retention purge, idempotency handling, per-source sequence assignment, and schema version lookup.
 

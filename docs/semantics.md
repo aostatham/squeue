@@ -192,4 +192,4 @@ The REST server delegates queue operations to `sequenced-queue-core`.
 
 The trusted direct Java client also delegates to `sequenced-queue-core` and uses the same production SQL and semantics. It bypasses REST API-key security and is only for trusted/internal Java deployments with direct PostgreSQL access.
 
-The direct Java client requires the core Flyway baseline to be applied. For the current pre-release build, the required schema baseline is `V1`, and `validateSchemaOnBuild(true)` fails fast when the schema is missing or incompatible.
+The direct Java client requires the core Flyway baseline to be applied. For the current release, the required schema baseline is `V1`, and `validateSchemaOnBuild(true)` fails fast when the schema is missing or incompatible.

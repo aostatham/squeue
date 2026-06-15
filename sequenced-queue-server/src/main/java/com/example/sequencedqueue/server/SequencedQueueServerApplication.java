@@ -27,7 +27,7 @@ public class SequencedQueueServerApplication {
                     -e SPRING_DATASOURCE_PASSWORD=sequenced_queue \\
                     -e SEQUENCED_QUEUE_API_KEY=replace-worker-key \\
                     -e SEQUENCED_QUEUE_ADMIN_API_KEY=replace-admin-key \\
-                    sequenced-queue-server:0.1.0-rc1
+                    sequenced-queue-server:0.1.0
                 """);
             return;
         }

@@ -196,7 +196,7 @@ SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
     .build();
 ```
 
-The direct client delegates to `sequenced-queue-core`. For the current pre-release build, it requires schema baseline `V1`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema baseline is not `V1`, the builder throws `QueueUnavailableException` and the client is not created.
+The direct client delegates to `sequenced-queue-core`. For the current release, it requires schema baseline `V1`. If `validateSchemaOnBuild(true)` is enabled and the current Flyway schema baseline is not `V1`, the builder throws `QueueUnavailableException` and the client is not created.
 
 Oversized direct-client fields are rejected by core as `QueueFieldTooLargeException`, with `fieldName`, `maxBytes`, and `actualBytes` available without exposing the oversized content.
 

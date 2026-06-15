@@ -81,4 +81,4 @@ The Java REST and trusted direct Java worker helpers share `sequenced-queue-work
 
 The shared worker module is deliberately transport-neutral. It contains no queue SQL, no PostgreSQL access, no REST client code, and no source lease or head-item ordering rules.
 
-Public DTO names and example module boundaries remain stable for the release candidate. Renaming `ClaimItem` to `ClaimedItem` or collapsing runnable example modules is deferred until there is a compatibility window and a clearer packaging policy.
+Public DTO names and example module boundaries remain stable for the MVP release. Renaming `ClaimItem` to `ClaimedItem` or collapsing runnable example modules is deferred until there is a compatibility window and a clearer packaging policy.

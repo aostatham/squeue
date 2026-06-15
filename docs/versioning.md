@@ -1,16 +1,16 @@
 # Versioning and Schema Compatibility
 
-The intended release candidate is `0.1.0-rc1`.
+The current MVP release is `0.1.0`.
 
-For the current pre-release build, the database schema baseline is `V1`.
+For the current MVP release, the database schema baseline is `V1`.
 
 The REST server and trusted direct Java client read Flyway schema history through `sequenced-queue-core`.
 
-The direct Java client validates that the database schema is compatible with the pre-release `V1` baseline. When `validateSchemaOnBuild(true)` is enabled, the direct client builder fails fast if the current schema baseline is missing or incompatible.
+The direct Java client validates that the database schema is compatible with the `V1` baseline. When `validateSchemaOnBuild(true)` is enabled, the direct client builder fails fast if the current schema baseline is missing or incompatible.
 
 ## Artifacts
 
-Maven artifacts currently use groupId `com.example` and version `0.1.0-rc1`.
+Maven artifacts currently use groupId `com.example` and version `0.1.0`.
 
 | Module path | Maven artifactId | Notes |
 | --- | --- | --- |
@@ -23,11 +23,11 @@ Maven artifacts currently use groupId `com.example` and version `0.1.0-rc1`.
 | `examples/java-rest-worker` | `sequenced-queue-example-java-rest-worker` | Runnable Java REST worker example. |
 | `examples/java-direct-worker` | `sequenced-queue-example-java-direct-worker` | Runnable trusted direct Java/PostgreSQL worker example. |
 
-The Python package lives in `sequenced-queue-python-client`, uses package name `sequenced-queue`, and uses PEP 440 version `0.1.0rc1` for this release candidate.
+The Python package lives in `sequenced-queue-python-client`, uses package name `sequenced-queue`, and uses PEP 440 version `0.1.0` for this release.
 
 The Maven groupId, license, SCM URL, project URL, developer, and organization metadata should be finalized before any public artifact publication. They are intentionally not filled with placeholder public URLs.
 
-The Docker image tag used in local documentation is `sequenced-queue-server:0.1.0-rc1`.
+The Docker image tag used in local documentation is `sequenced-queue-server:0.1.0`.
 
 ## Schema Compatibility
 
