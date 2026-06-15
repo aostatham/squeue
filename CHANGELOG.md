@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.1.0-rc3] - 2026-06-15
+
+- Includes Stage 3A global size limits for payloads, headers, completion results, error details, admin reasons, and admin metadata.
+- Adds `FIELD_TOO_LARGE` structured error semantics.
+- Adds direct Java `QueueFieldTooLargeException`.
+- Preserves the pre-release schema baseline `V1`.
+- Adds Stage 3A size-limit design documentation.
+- Keeps direct Java/PostgreSQL client support mandatory and core-backed.
+- No queue semantics changed.
+- No schema migration was added.
+
+## [0.1.0-rc2] - 2026-06-14
+
+- Superseded before MVP release.
+
 ## [0.1.0-rc1] - 2026-06-14
 
 First correctness and developer-experience release candidate for `sequenced-queue`.
