@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## v0.1.1
+
+Clarifies the MVP package boundary.
+
+MVP-supported packages:
+- `sequenced-queue-core`
+- `sequenced-queue-java-direct-client`
+- `sequenced-queue-worker-core` as a support dependency
+
+Post-MVP product surfaces remain in the repository but are outside the MVP support boundary:
+- REST server
+- OpenAPI
+- Docker server packaging
+- Java REST client
+- Python client
+
+No queue semantics changed.
+No schema changes were made.
+Schema baseline remains `V1`.
+
 ## [0.1.0] - 2026-06-15
 
 First MVP release of `sequenced-queue`.
