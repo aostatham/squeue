@@ -10,6 +10,8 @@ Package 1 is `sequenced-queue-core`. It is the core-with-schema package and owns
 
 Package 2 is the trusted direct Java/PostgreSQL API in `clients/java-direct`. It delegates to `sequenced-queue-core` and is the primary MVP access path for trusted internal Java/wf deployments.
 
+`sequenced-queue-worker-core` is a shared support artifact used by the direct Java worker helper. It is part of the MVP dependency graph, but MVP users normally interact with the direct Java API rather than using worker-core directly.
+
 The REST server, OpenAPI document, Docker server packaging, Java REST client, Python REST client, and examples remain in the repository but are post-MVP product surfaces outside the Package 1/Package 2 support boundary.
 
 The REST server and trusted direct Java client read Flyway schema history through `sequenced-queue-core`.

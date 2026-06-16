@@ -12,7 +12,7 @@
 
   <artifactId>sequenced-queue-java-direct-client</artifactId>
   <name>sequenced-queue-java-direct-client</name>
-  <description>Trusted direct Java PostgreSQL client backed by sequenced-queue-core.</description>
+  <description>MVP direct Java/PostgreSQL API backed by sequenced-queue-core for trusted internal deployments.</description>
 
   <dependencies>
     <dependency>

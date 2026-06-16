@@ -64,7 +64,9 @@ Package 1 owns source ordering, source leases, item leases, status transitions, 
 
 ### Package 2 - Direct Java API
 
-The trusted direct Java/PostgreSQL API is the primary MVP access path for internal Java/wf deployments. It delegates to `sequenced-queue-core`, uses a caller-provided `DataSource`, bypasses REST API-key security, and can fail fast with schema compatibility validation.
+The trusted direct Java/PostgreSQL API in `clients/java-direct` is the primary MVP access path for internal Java/wf deployments. Its Maven artifact is `sequenced-queue-java-direct-client`. It delegates to `sequenced-queue-core`, uses a caller-provided `DataSource`, bypasses REST API-key security, and can fail fast with schema compatibility validation.
+
+`sequenced-queue-worker-core` is a shared support artifact used by the direct Java worker helper. It is part of the MVP dependency graph, but MVP users normally interact with the direct Java API rather than using worker-core directly.
 
 ### Post-MVP Product Surfaces
 
@@ -270,6 +272,37 @@ The database must already have the `sequenced-queue-core` Flyway baseline applie
 Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, manual retention purge, idempotency handling, per-source sequence assignment, and schema version lookup.
 
 Oversized direct-client fields are rejected as `QueueFieldTooLargeException`, which exposes `fieldName`, `maxBytes`, and `actualBytes` without exposing the oversized content.
+
+Use a pooled `DataSource`, such as HikariCP or an application-managed container pool. The direct client does not create a production database pool and does not require the REST server.
+
+For wf-style command/event work, use `queueName` values such as `wf.commands` or `wf.events`. Use the workflow instance id, or `workflowInstanceId:threadId`, as `sourceId` so the same workflow source is processed sequentially while different workflow sources can process concurrently. Handlers must be idempotent because delivery is at-least-once.
+
+```java
+SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
+    .dataSource(dataSource)
+    .validateSchemaOnBuild(true)
+    .build();
+
+client.enqueue("wf.commands", EnqueueRequest.builder()
+    .sourceId(workflowInstanceId)
+    .itemType("wf.command")
+    .payloadJson("""
+        {"commandName":"SendEmail","workflowInstanceId":"%s","threadId":"_main"}
+        """.formatted(workflowInstanceId))
+    .build());
+
+SequencedQueueDirectWorker worker = client.worker("wf.commands")
+    .workerId("wf-command-worker-1")
+    .handler("wf.command", item -> {
+        // Execute the wf command idempotently.
+        return DirectQueueResult.success(Map.of("ok", true));
+    })
+    .build();
+
+worker.runForever();
+```
+
+The direct worker helper uses short core transactions for claim and complete/fail. User handler code runs outside database transactions.
 
 ## Python REST Client
 
