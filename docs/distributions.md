@@ -1,20 +1,48 @@
 # sequenced-queue distributions
 
-## Core Runtime
+## MVP-Supported Packages
+
+### Package 1 - Core With Schema
 
 Includes:
 - sequenced-queue-core
-- sequenced-queue-worker-core
-- sequenced-queue-server
-- sequenced-queue-java-client
-- clients/java-direct
-- Java examples
+- PostgreSQL `V1` Flyway schema baseline
+- production queue SQL
+- core queue domain model
+- transactional queue semantics
+- schema metadata and compatibility model
+- global validation, limits, and stable error codes
 - PostgreSQL contract tests
 
 Required for:
 - strict per-source ordered work dispatch
-- Java REST workers
-- trusted direct Java/PostgreSQL workers
+- source and item lease correctness
+- retry/dead-letter/admin repair semantics
+- retention purge semantics
+- direct Java schema compatibility validation
+
+### Package 2 - Direct Java API
+
+Includes:
+- clients/java-direct
+- trusted Java/PostgreSQL client API
+- direct worker helper
+
+Required for:
+- trusted direct Java/PostgreSQL deployments
+- caller-provided `DataSource` integration
+- direct Java access to the core-backed queue semantics
+
+## Repository Product Surfaces
+
+Includes:
+- sequenced-queue-worker-core
+- sequenced-queue-server
+- sequenced-queue-java-client
+- Java examples
+- PostgreSQL contract tests
+
+These remain in the repository, but REST server packaging, OpenAPI, Docker server image, Java REST client, Python REST client, and examples are outside the MVP Package 1/Package 2 support boundary.
 
 `sequenced-queue-worker-core` is an internal Java worker-loop helper. It contains no production SQL, no REST transport, and no database access.
 

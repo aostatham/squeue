@@ -4,6 +4,14 @@ The current MVP release is `0.1.0`.
 
 For the current MVP release, the database schema baseline is `V1`.
 
+## MVP Support Boundary
+
+Package 1 is `sequenced-queue-core`. It is the core-with-schema package and owns the PostgreSQL `V1` schema baseline, production queue SQL, queue semantics, schema metadata, validation, and contract-tested behavior.
+
+Package 2 is the trusted direct Java/PostgreSQL API in `clients/java-direct`. It delegates to `sequenced-queue-core` and is the primary MVP access path for trusted internal Java/wf deployments.
+
+The REST server, OpenAPI document, Docker server packaging, Java REST client, Python REST client, and examples remain in the repository but are post-MVP product surfaces outside the Package 1/Package 2 support boundary.
+
 The REST server and trusted direct Java client read Flyway schema history through `sequenced-queue-core`.
 
 The direct Java client validates that the database schema is compatible with the `V1` baseline. When `validateSchemaOnBuild(true)` is enabled, the direct client builder fails fast if the current schema baseline is missing or incompatible.

@@ -6,20 +6,28 @@
 
 First MVP release of `sequenced-queue`.
 
+MVP-supported packages:
+
+- Package 1: `sequenced-queue-core`, the core-with-schema package that owns PostgreSQL `V1` schema, production SQL, queue semantics, validation, schema metadata, and contract-tested behavior.
+- Package 2: trusted direct Java/PostgreSQL API for internal Java/wf deployments.
+
 Includes:
 
 - PostgreSQL-backed durable source-ordered queue.
-- REST server.
-- Java REST client.
-- Python REST client.
 - Direct Java/PostgreSQL client for trusted internal deployments.
 - Shared core queue semantics.
 - Worker leases, heartbeat, retry/backoff, dead-letter blocking, and admin repair.
-- Operational baseline with health, metrics, and admin audit.
-- OpenAPI documentation.
-- Docker packaging.
 - Pre-release schema baseline `V1`.
 - Stage 3A global size limits and `FIELD_TOO_LARGE` error semantics.
+
+Post-MVP product surfaces remain in the repository outside the MVP Package 1/Package 2 support boundary:
+
+- REST server.
+- OpenAPI documentation.
+- Docker server packaging.
+- Java REST client.
+- Python REST client.
+- Worker examples and operational docs.
 
 Guarantees:
 

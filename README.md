@@ -41,6 +41,7 @@ Current release - v0.1.0 MVP
 ## Documentation
 
 - [Developer Quickstart](docs/developer_quickstart.md)
+- [Core Schema Package](docs/core-schema.md)
 - [Changelog](CHANGELOG.md)
 - [Release Checklist](RELEASE_CHECKLIST.md)
 - [Canonical Semantics](docs/semantics.md)
@@ -52,6 +53,22 @@ Current release - v0.1.0 MVP
 - [Examples README](examples/README.md)
 - [Product Roadmap](docs/sequenced_queue_product_roadmap.md)
 - [Decision Log](docs/DECISIONS.md)
+
+## MVP Support Boundary
+
+### Package 1 - Core With Schema
+
+`sequenced-queue-core` is the source of queue correctness for the MVP. It contains the PostgreSQL `V1` schema baseline, queue domain model, production SQL/state transitions, schema metadata, global validation/limits, stable core error codes, and PostgreSQL contract tests.
+
+Package 1 owns source ordering, source leases, item leases, status transitions, retry/dead-letter behavior, admin repair behavior, retention purge semantics, and `FIELD_TOO_LARGE` validation. It is the only package that owns production queue SQL.
+
+### Package 2 - Direct Java API
+
+The trusted direct Java/PostgreSQL API is the primary MVP access path for internal Java/wf deployments. It delegates to `sequenced-queue-core`, uses a caller-provided `DataSource`, bypasses REST API-key security, and can fail fast with schema compatibility validation.
+
+### Post-MVP Product Surfaces
+
+The REST server, OpenAPI document, Docker server packaging, Java REST client, Python REST client, worker examples, and operational docs remain in this repository, but they are outside the MVP Package 1/Package 2 support boundary.
 
 ## Local Run
 

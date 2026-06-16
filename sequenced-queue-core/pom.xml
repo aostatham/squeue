@@ -11,7 +11,7 @@
 
   <artifactId>sequenced-queue-core</artifactId>
   <name>sequenced-queue-core</name>
-  <description>Shared queue implementation, PostgreSQL repository, Flyway migrations, and core queue semantics.</description>
+  <description>Core schema and queue semantics package: PostgreSQL repository, Flyway V1 baseline, validation, and state transitions.</description>
 
   <dependencies>
     <dependency>
