@@ -1,12 +1,8 @@
 # sequenced-queue
 
-`sequenced-queue` is a lightweight PostgreSQL-backed durable work queue with strict per-source ordering and REST, Java, Python, and trusted direct Java/PostgreSQL access paths.
+`sequenced-queue` is a lightweight PostgreSQL-backed durable work queue with strict per-source ordering.
 
-The core product is the Core Runtime.
-The Full Distribution adds optional clients/examples/docs.
-Both use the same core semantics.
-
-Invariant:
+The central invariant is:
 
 ```text
 For a given (queueName, sourceId), queue items are processed in sequence order and are not processed concurrently.
@@ -14,76 +10,330 @@ For a given (queueName, sourceId), queue items are processed in sequence order a
 
 Items for different `sourceId` values may be processed concurrently.
 
-The queue guarantees durable at-least-once delivery and strict per-source processing order.
+The queue provides durable **at-least-once** delivery and strict per-source processing order. It does **not** provide exactly-once side effects. Consumers must use idempotent handlers.
 
-It does not guarantee exactly-once side effects. Handlers must be idempotent.
-
-Project status:
+## Current release status
 
 ```text
 Stage 0 - Correctness Foundation: passed
 Stage 1 - Operational Readiness Baseline: passed
 Stage 2 - Developer Experience Baseline: passed
-Current release - v0.1.0 MVP
+
+v0.1.0 - initial MVP release
+v0.1.1 - corrected MVP package-boundary release
 ```
+
+The current recommended baseline is:
+
+```text
+v0.1.1
+```
+
+## Distribution model
+
+The repository contains both the MVP-supported direct Java distribution and broader post-MVP product surfaces.
+
+### MVP-supported packages
+
+```text
+Package 1: sequenced-queue-core
+Package 2: sequenced-queue-java-direct-client
+Support dependency: sequenced-queue-worker-core
+```
+
+The MVP support boundary is **core schema + direct Java/PostgreSQL API**.
+
+This is the intended path for trusted internal Java deployments, including `wf`-style workflow command/event processing.
+
+### Post-MVP / broader product surfaces
+
+The following components remain in the repository and are kept buildable/testable, but they are outside the MVP Package 1/Package 2 support boundary:
+
+```text
+sequenced-queue-server
+sequenced-queue-java-client
+sequenced-queue-python-client
+docs/openapi.yaml
+Docker server packaging
+REST examples
+Python examples
+```
+
+All supported access paths must continue to delegate queue semantics to `sequenced-queue-core`.
+
+---
 
 ## Modules
 
-- `sequenced-queue-core`: shared queue implementation, Flyway schema migration, plain JDBC PostgreSQL repository, transaction abstraction, leases, retries, dead-letter handling, and admin repair semantics.
-- `sequenced-queue-worker-core`: internal Java worker loop shared by the Java REST and trusted direct Java worker helpers. It has no PostgreSQL or REST transport implementation.
-- `sequenced-queue-server`: Spring Boot HTTP adapter, API key filter, Actuator metrics/health, and OpenAPI surface over `sequenced-queue-core`.
-- `sequenced-queue-java-client`: Java HTTP client and polling worker helper.
-- `clients/java-direct`: trusted/internal Java PostgreSQL adapter that uses the same `sequenced-queue-core` implementation through a caller-provided `DataSource`.
-- `sequenced-queue-python-client`: Python HTTP client and polling worker helper.
-- `docs/openapi.yaml`: MVP HTTP API description.
-- `examples`: runnable Java and Python producer/worker examples.
+- `sequenced-queue-core`: core schema and queue semantics package. It contains the PostgreSQL `V1` schema baseline, production SQL/state transitions, transaction abstraction, source leases, item leases, retries, dead-letter handling, admin repair semantics, schema metadata, validation, and PostgreSQL contract tests.
+- `sequenced-queue-worker-core`: shared Java worker loop used by worker helpers. It has no PostgreSQL or REST transport implementation. It is a support dependency for the MVP direct Java API.
+- `clients/java-direct`: trusted/internal direct Java/PostgreSQL adapter. Its Maven artifact is `sequenced-queue-java-direct-client`. It uses a caller-provided `DataSource`, delegates to `sequenced-queue-core`, and does not require the REST server.
+- `sequenced-queue-server`: Spring Boot HTTP adapter over `sequenced-queue-core`, with API key filter, Actuator metrics/health, and OpenAPI surface. This is a post-MVP/full-distribution surface.
+- `sequenced-queue-java-client`: Java HTTP client and polling worker helper for the REST API. This is a post-MVP/full-distribution surface.
+- `sequenced-queue-python-client`: Python HTTP client and polling worker helper for the REST API. This is a post-MVP/full-distribution surface.
+- `docs/openapi.yaml`: HTTP API description for the REST server surface.
+- `examples`: runnable examples for Java/Python/direct usage, depending on the example.
+
+---
 
 ## Documentation
 
 - [Developer Quickstart](docs/developer_quickstart.md)
 - [Core Schema Package](docs/core-schema.md)
+- [Distributions](docs/distributions.md)
+- [Versioning and Schema Compatibility](docs/versioning.md)
+- [Canonical Semantics](docs/semantics.md)
+- [Security and Database Privileges](docs/security.md)
 - [Changelog](CHANGELOG.md)
 - [Release Checklist](RELEASE_CHECKLIST.md)
-- [Canonical Semantics](docs/semantics.md)
-- [Simplification Strategy](docs/simplification_strategy.md)
 - [Known Issues and Simplification Follow-ups](docs/ISSUES.md)
-- [Security and Database Privileges](docs/security.md)
-- [Versioning and Schema Compatibility](docs/versioning.md)
+- [Simplification Strategy](docs/simplification_strategy.md)
 - [OpenAPI Contract](docs/openapi.yaml)
 - [Examples README](examples/README.md)
 - [Product Roadmap](docs/sequenced_queue_product_roadmap.md)
 - [Decision Log](docs/DECISIONS.md)
 
+---
+
 ## MVP Support Boundary
 
-### Package 1 - Core With Schema
+### Package 1 — Core with schema
 
-`sequenced-queue-core` is the source of queue correctness for the MVP. It contains the PostgreSQL `V1` schema baseline, queue domain model, production SQL/state transitions, schema metadata, global validation/limits, stable core error codes, and PostgreSQL contract tests.
+`sequenced-queue-core` is the source of queue correctness for the MVP.
 
-Package 1 owns source ordering, source leases, item leases, status transitions, retry/dead-letter behavior, admin repair behavior, retention purge semantics, and `FIELD_TOO_LARGE` validation. It is the only package that owns production queue SQL.
+It owns:
 
-### Package 2 - Direct Java API
+```text
+PostgreSQL V1 schema baseline
+production queue SQL
+queue domain model
+source ordering
+source leases
+item leases
+status transitions
+retry/dead-letter behaviour
+admin repair behaviour
+manual retention purge semantics
+global validation and size limits
+stable core error codes
+FIELD_TOO_LARGE validation
+schema metadata
+PostgreSQL contract tests
+```
 
-The trusted direct Java/PostgreSQL API in `clients/java-direct` is the primary MVP access path for internal Java/wf deployments. Its Maven artifact is `sequenced-queue-java-direct-client`. It delegates to `sequenced-queue-core`, uses a caller-provided `DataSource`, bypasses REST API-key security, and can fail fast with schema compatibility validation.
+It is the only package that owns production queue state-transition SQL.
 
-`sequenced-queue-worker-core` is a shared support artifact used by the direct Java worker helper. It is part of the MVP dependency graph, but MVP users normally interact with the direct Java API rather than using worker-core directly.
+### Package 2 — Direct Java API
 
-### Post-MVP Product Surfaces
+The trusted direct Java/PostgreSQL API in `clients/java-direct` is the primary MVP access path for internal Java deployments.
 
-The REST server, OpenAPI document, Docker server packaging, Java REST client, Python REST client, worker examples, and operational docs remain in this repository, but they are outside the MVP Package 1/Package 2 support boundary.
+Its Maven artifact is:
 
-## Local Run
+```text
+sequenced-queue-java-direct-client
+```
+
+It:
+
+```text
+delegates to sequenced-queue-core
+uses a caller-provided DataSource
+does not require the REST server
+bypasses REST API-key security
+should use a least-privilege database role
+can validate schema compatibility at startup
+supports direct Java producer, worker, recovery, and admin operations
+```
+
+`sequenced-queue-worker-core` is part of the MVP dependency graph as a support dependency, but MVP users normally interact with `sequenced-queue-java-direct-client` rather than using worker-core directly.
+
+### Post-MVP product surfaces
+
+The REST server, OpenAPI document, Docker server packaging, Java REST client, Python REST client, REST examples, Python examples, and operational HTTP docs remain in the repository, but they are outside the MVP Package 1/Package 2 support boundary.
+
+---
+
+## Schema lifecycle
+
+The queue schema is persistent infrastructure. Applications should not create, drop, or reset it on every run.
+
+Correct lifecycle:
+
+```text
+deployment/setup:
+  install the V1 schema once
+
+normal application startup:
+  validate that the schema exists and is compatible
+
+normal runtime:
+  enqueue, claim, complete, fail, heartbeat, recover, repair
+
+application shutdown/restart:
+  queue tables and queued data remain in PostgreSQL
+```
+
+The direct Java client should validate schema compatibility. It should not create, migrate, drop, or reset queue tables during normal operation.
+
+For the current release, the schema baseline is:
+
+```text
+V1
+```
+
+There is no current `V2`/`V3`/`V4` migration chain.
+
+### Installing the schema with `psql`
+
+A simple deployment can install the packaged SQL schema with `psql`:
+
+```sh
+psql \
+  -h localhost \
+  -U wf_admin \
+  -d wf_db \
+  -v ON_ERROR_STOP=1 \
+  -f V1__initial_queue_schema.sql
+```
+
+Do not put production passwords directly on the command line. Prefer `~/.pgpass`, environment-managed secrets, CI/CD secrets, or a deployment secret manager.
+
+A typical role split is:
+
+```text
+wf_admin:
+  installs or upgrades schema
+
+wf_app:
+  runs wf/runtime/workers
+  reads and writes queue data
+  does not run DDL
+```
+
+### Installing the schema with Flyway
+
+If Flyway is used for deployment, apply the core migration from the packaged classpath location:
+
+```java
+Flyway.configure()
+    .dataSource(adminDataSource)
+    .locations("classpath:db/migration")
+    .load()
+    .migrate();
+```
+
+This should be deployment/migration code, not ordinary direct-client startup behaviour.
+
+---
+
+## Direct Java quick start
+
+Use a pooled `DataSource`, such as HikariCP or an application-managed container pool.
+
+```java
+HikariConfig config = new HikariConfig();
+config.setJdbcUrl("jdbc:postgresql://localhost:5432/wf_db");
+config.setUsername("wf_app");
+config.setPassword(System.getenv("WF_DB_PASSWORD"));
+config.setMaximumPoolSize(10);
+
+DataSource dataSource = new HikariDataSource(config);
+```
+
+Build the direct client with schema validation enabled:
+
+```java
+SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
+    .dataSource(dataSource)
+    .validateSchemaOnBuild(true)
+    .build();
+```
+
+Expected startup behaviour:
+
+```text
+schema exists and is compatible: client starts
+schema missing: client fails fast
+schema incompatible: client fails fast
+```
+
+The direct client does not create a production database pool and does not require the REST server.
+
+---
+
+## wf-style command/event usage
+
+For workflow-style command/event work, use queue names such as:
+
+```text
+wf.commands
+wf.events
+```
+
+Recommended first choice:
+
+```text
+queueName = wf.commands
+sourceId  = workflowInstanceId
+itemType  = wf.command
+```
+
+This gives:
+
+```text
+same workflow instance = sequential processing
+different workflow instances = concurrent processing
+```
+
+If independent workflow threads may safely run concurrently, use:
+
+```text
+sourceId = workflowInstanceId:threadId
+```
+
+Example enqueue:
+
+```java
+client.enqueue("wf.commands", EnqueueRequest.builder()
+    .sourceId(workflowInstanceId)
+    .itemType("wf.command")
+    .idempotencyKey(commandId)
+    .payloadJson("""
+        {"commandName":"SendEmail","workflowInstanceId":"%s","threadId":"_main"}
+        """.formatted(workflowInstanceId))
+    .headersJson("""
+        {"correlationId":"%s"}
+        """.formatted(correlationId))
+    .maxAttempts(5)
+    .build());
+```
+
+Example worker:
+
+```java
+SequencedQueueDirectWorker worker = client.worker("wf.commands")
+    .workerId("wf-command-worker-1")
+    .handler("wf.command", item -> {
+        // Execute the wf command idempotently.
+        return DirectQueueResult.success(Map.of("ok", true));
+    })
+    .build();
+
+worker.runForever();
+```
+
+The direct worker helper uses short core transactions for claim and complete/fail. User handler code runs outside database transactions.
+
+Handlers must be idempotent because delivery is at-least-once. For external side effects, use a stable command id or effect id to detect duplicate processing after worker crash/recovery.
+
+---
+
+## Local development and verification
 
 Start PostgreSQL:
 
 ```sh
 docker compose up -d postgres
-```
-
-Run the server:
-
-```sh
-./mvnw -pl sequenced-queue-server spring-boot:run
 ```
 
 Run Java tests:
@@ -119,12 +369,44 @@ python -m pytest
 
 For a runnable producer/worker walkthrough, see [Developer Quickstart](docs/developer_quickstart.md).
 
-## Docker Image
+---
+
+## REST server local run
+
+The REST server is a post-MVP/full-distribution surface.
+
+Run the server locally:
+
+```sh
+./mvnw -pl sequenced-queue-server spring-boot:run
+```
+
+Worker endpoints live under `/queues/{queueName}` and require:
+
+```text
+Authorization: Bearer <sequenced-queue.api-key>
+```
+
+Admin endpoints live under `/admin/queues/{queueName}` and require:
+
+```text
+Authorization: Bearer <sequenced-queue.admin-api-key>
+```
+
+The admin API key can also call worker endpoints. The server fails startup if the worker and admin API keys are equal.
+
+This is a simple static/configured API key model. It is not OAuth/OIDC, full API-key lifecycle management, key rotation, hashed key storage, or production-grade identity management.
+
+---
+
+## Docker server image
+
+The Docker server image is a post-MVP/full-distribution surface.
 
 Build the server image from the repository root:
 
 ```sh
-docker build -t sequenced-queue-server:0.1.0 -f sequenced-queue-server/Dockerfile .
+docker build -t sequenced-queue-server:0.1.1 -f sequenced-queue-server/Dockerfile .
 ```
 
 Run it against an existing PostgreSQL database:
@@ -136,12 +418,14 @@ docker run --rm -p 8080:8080 \
   -e SPRING_DATASOURCE_PASSWORD=sequenced_queue \
   -e SEQUENCED_QUEUE_API_KEY=replace-worker-key \
   -e SEQUENCED_QUEUE_ADMIN_API_KEY=replace-admin-key \
-  sequenced-queue-server:0.1.0
+  sequenced-queue-server:0.1.1
 ```
 
 The server also supports the local development aliases `DATABASE_URL`, `DATABASE_USERNAME`, and `DATABASE_PASSWORD` through `application.yml`; the `SPRING_DATASOURCE_*` names are the standard Spring Boot overrides.
 
-## Delivery Semantics
+---
+
+## Delivery semantics
 
 - At-least-once delivery.
 - No exactly-once side effects.
@@ -155,25 +439,43 @@ Consumers must use idempotent handlers because worker crashes can cause duplicat
 
 The canonical semantics document is [docs/semantics.md](docs/semantics.md).
 
-## Lease and Retry Model
+---
+
+## Lease and retry model
 
 Claiming work leases one source and its current head item. A worker must complete, fail, or heartbeat with the matching `workerId` and `leaseId`.
 
-Retryable failures become `retry_wait` until attempts are exhausted. Exhausted retryable failures become `dead_lettered` and block the source. Non-retryable failures become `failed`; `failed`, `skipped`, `cancelled`, and `succeeded` are passable terminal states.
+Retryable failures become `retry_wait` until attempts are exhausted. Exhausted retryable failures become `dead_lettered` and block the source.
 
-Successful admin repair operations are written to `queue_admin_audit`. See [docs/semantics.md](docs/semantics.md) for canonical retry, lease, recovery, and admin repair detail.
+Non-retryable failures become `failed`. `failed`, `skipped`, `cancelled`, and `succeeded` are passable terminal states.
 
-Manual retention purge is available through the admin API. It deletes only old passable terminal rows (`succeeded`, `cancelled`, `skipped`, `failed`) and never purges `pending`, `processing`, `retry_wait`, or `dead_lettered`. Purge requests are bounded by `limit`, defaulting to `1000` and capped by `sequenced-queue.max-retention-purge-batch-size`.
+Successful admin repair operations are written to `queue_admin_audit`. See [docs/semantics.md](docs/semantics.md) for canonical retry, lease, recovery, and admin repair details.
 
-## REST API and Security
+Manual retention purge deletes only old passable terminal rows:
 
-Worker endpoints live under `/queues/{queueName}` and require `Authorization: Bearer <sequenced-queue.api-key>`. The admin API key can also call worker endpoints.
+```text
+succeeded
+cancelled
+skipped
+failed
+```
 
-Admin endpoints live under `/admin/queues/{queueName}` and require `Authorization: Bearer <sequenced-queue.admin-api-key>`. The server fails startup if the worker and admin API keys are equal. This is a simple static/configured API key model; it is not OAuth/OIDC, full API-key lifecycle management, key rotation, hashed key storage, or production-grade identity management.
+It never purges:
+
+```text
+pending
+processing
+retry_wait
+dead_lettered
+```
+
+Purge requests are bounded by `limit`, defaulting to `1000` and capped by `sequenced-queue.max-retention-purge-batch-size`.
+
+---
+
+## Global queue settings
 
 Queue configuration is global-only. There is no `queue_config` table or queue-level database policy model.
-
-Global queue settings:
 
 ```text
 sequenced-queue.default-lease-seconds=60
@@ -189,19 +491,13 @@ sequenced-queue.max-admin-metadata-bytes=32768
 sequenced-queue.max-retention-purge-batch-size=10000
 ```
 
-These limits are enforced in `sequenced-queue-core`, not only by REST controllers. Oversized content is not echoed in REST error responses, direct Java exceptions, or application logs.
+These limits are enforced in `sequenced-queue-core`, not only by REST controllers.
 
-REST errors use a stable shape:
+Oversized content is not echoed in REST error responses, direct Java exceptions, or application logs.
 
-```json
-{
-  "errorCode": "LEASE_LOST",
-  "message": "lease is not held by worker",
-  "details": {}
-}
-```
+Oversized fields use `FIELD_TOO_LARGE` and include safe byte counts.
 
-Oversized fields use `FIELD_TOO_LARGE` and include safe byte counts:
+REST example:
 
 ```json
 {
@@ -214,9 +510,29 @@ Oversized fields use `FIELD_TOO_LARGE` and include safe byte counts:
 }
 ```
 
-Known error codes include `VALIDATION_ERROR`, `ITEM_NOT_FOUND`, `SOURCE_NOT_FOUND`, `SOURCE_BLOCKED`, `LEASE_LOST`, `LEASE_EXPIRED`, `ITEM_NOT_PROCESSING`, `IDEMPOTENCY_CONFLICT`, `UNAUTHORIZED`, `FORBIDDEN`, `QUEUE_CONFLICT`, and `INTERNAL_ERROR`.
+Known error codes include:
 
-## Operational Endpoints
+```text
+VALIDATION_ERROR
+FIELD_TOO_LARGE
+ITEM_NOT_FOUND
+SOURCE_NOT_FOUND
+SOURCE_BLOCKED
+LEASE_LOST
+LEASE_EXPIRED
+ITEM_NOT_PROCESSING
+IDEMPOTENCY_CONFLICT
+UNAUTHORIZED
+FORBIDDEN
+QUEUE_CONFLICT
+INTERNAL_ERROR
+```
+
+---
+
+## Operational HTTP endpoints
+
+Operational HTTP endpoints are part of the REST server/full-distribution surface.
 
 Spring Boot Actuator exposes:
 
@@ -263,48 +579,45 @@ GET /admin/queues/{queueName}/audit
 
 List endpoints support `limit` and `offset`.
 
-## Direct Java Client
+---
 
-The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server. It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
+## Direct Java client
 
-The database must already have the `sequenced-queue-core` Flyway baseline applied. For the current release, the database schema baseline is `V1`; trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
+The direct Java client is for trusted internal Java deployments that can safely talk to PostgreSQL without going through the REST server.
 
-Current support: enqueue, claim, complete, fail, heartbeat, expired-lease recovery, blocked-source inspection, admin retry/skip/cancel/unblock, manual retention purge, idempotency handling, per-source sequence assignment, and schema version lookup.
+It delegates to `sequenced-queue-core`, so it shares the same PostgreSQL SQL implementation and queue semantics as the REST server path. It bypasses API-layer security and should use a least-privilege database role.
+
+The database must already have the `sequenced-queue-core` schema baseline installed. For the current release, that baseline is `V1`.
+
+Trusted deployments can call `getSchemaInfo()` or enable `validateSchemaOnBuild(true)` on the direct client builder to fail fast on missing or incompatible schema.
+
+Current support:
+
+```text
+enqueue
+claim
+complete
+fail
+heartbeat
+expired-lease recovery
+blocked-source inspection
+admin retry
+admin skip
+admin cancel
+admin unblock
+manual retention purge
+idempotency handling
+per-source sequence assignment
+schema version lookup
+```
 
 Oversized direct-client fields are rejected as `QueueFieldTooLargeException`, which exposes `fieldName`, `maxBytes`, and `actualBytes` without exposing the oversized content.
 
-Use a pooled `DataSource`, such as HikariCP or an application-managed container pool. The direct client does not create a production database pool and does not require the REST server.
-
-For wf-style command/event work, use `queueName` values such as `wf.commands` or `wf.events`. Use the workflow instance id, or `workflowInstanceId:threadId`, as `sourceId` so the same workflow source is processed sequentially while different workflow sources can process concurrently. Handlers must be idempotent because delivery is at-least-once.
-
-```java
-SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
-    .dataSource(dataSource)
-    .validateSchemaOnBuild(true)
-    .build();
-
-client.enqueue("wf.commands", EnqueueRequest.builder()
-    .sourceId(workflowInstanceId)
-    .itemType("wf.command")
-    .payloadJson("""
-        {"commandName":"SendEmail","workflowInstanceId":"%s","threadId":"_main"}
-        """.formatted(workflowInstanceId))
-    .build());
-
-SequencedQueueDirectWorker worker = client.worker("wf.commands")
-    .workerId("wf-command-worker-1")
-    .handler("wf.command", item -> {
-        // Execute the wf command idempotently.
-        return DirectQueueResult.success(Map.of("ok", true));
-    })
-    .build();
-
-worker.runForever();
-```
-
 The direct worker helper uses short core transactions for claim and complete/fail. User handler code runs outside database transactions.
 
-## Python REST Client
+---
+
+## Python REST client
 
 The Python package in `sequenced-queue-python-client` is an HTTP client and worker helper. It uses the REST API and does not access PostgreSQL directly.
 
@@ -316,3 +629,21 @@ Run its tests with:
 cd sequenced-queue-python-client
 python -m pytest
 ```
+
+---
+
+## Non-goals for this release
+
+`sequenced-queue` is not:
+
+```text
+a Kafka replacement
+a RabbitMQ replacement
+a general pub/sub broker
+a fanout/event bus
+a global-ordering queue
+an exactly-once side-effect executor
+a workflow engine
+```
+
+The intended niche is durable source-ordered work dispatch.
