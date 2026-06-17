@@ -2,6 +2,9 @@ package com.sequencedqueue.core;
 
 import static com.sequencedqueue.core.QueueDtos.*;
 
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Savepoint;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -13,6 +16,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Logger;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +25,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * Default core implementation that owns queue validation, sequencing, locking, and state transitions.
  */
 public class DefaultQueueService implements QueueOperations {
+    /** Safe diagnostics for best-effort wake-up notification failures. */
+    private static final Logger LOGGER = Logger.getLogger(DefaultQueueService.class.getName());
     /** Jackson type token for persisted JSON objects. */
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
@@ -616,12 +622,47 @@ public class DefaultQueueService implements QueueOperations {
             return;
         }
         if (connectionProvider == null) {
-            throw new QueueException(QueueException.INTERNAL_SERVER_ERROR, "queue notifier requires an active SQL connection provider");
+            LOGGER.warning(() -> "queue wake-up notification skipped for queue " + queueName + ": no SQL connection provider");
+            return;
+        }
+        Savepoint savepoint = null;
+        try {
+            Connection connection = connectionProvider.currentConnection();
+            savepoint = connection.setSavepoint();
+            queueNotifier.notifyWorkAvailable(connection, new QueueWakeupEvent(queueName, reason));
+            releaseSavepoint(connection, savepoint, queueName);
+        } catch (SQLException e) {
+            rollbackNotificationSavepoint(savepoint, queueName, e);
+            LOGGER.warning(() -> "queue wake-up notification failed for queue " + queueName + ": " + e.getClass().getSimpleName());
+        } catch (RuntimeException e) {
+            rollbackNotificationSavepoint(savepoint, queueName, e);
+            LOGGER.warning(() -> "queue wake-up notification failed for queue " + queueName + ": " + e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Releases the notification savepoint after a successful best-effort notify.
+     */
+    private void releaseSavepoint(Connection connection, Savepoint savepoint, String queueName) {
+        try {
+            connection.releaseSavepoint(savepoint);
+        } catch (SQLException e) {
+            LOGGER.warning(() -> "queue wake-up savepoint release failed for queue " + queueName + ": " + e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Restores the queue transaction when a best-effort notification fails.
+     */
+    private void rollbackNotificationSavepoint(Savepoint savepoint, String queueName, Exception originalFailure) {
+        if (savepoint == null) {
+            return;
         }
         try {
-            queueNotifier.notifyWorkAvailable(connectionProvider.currentConnection(), new QueueWakeupEvent(queueName, reason));
-        } catch (java.sql.SQLException e) {
-            throw new QueueException(QueueException.INTERNAL_SERVER_ERROR, "queue wake-up notification failed", e).withQueueName(queueName);
+            connectionProvider.currentConnection().rollback(savepoint);
+        } catch (SQLException rollbackFailure) {
+            throw new QueueException(QueueException.INTERNAL_SERVER_ERROR, "queue wake-up notification failed and transaction could not be restored", originalFailure)
+                .withQueueName(queueName);
         }
     }
 

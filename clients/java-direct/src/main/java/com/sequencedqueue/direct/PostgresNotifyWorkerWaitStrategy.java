@@ -155,17 +155,18 @@ public final class PostgresNotifyWorkerWaitStrategy implements DirectWorkerWaitS
         }
 
         private void closeConnection() {
-            if (connection != null) {
-                try (Statement statement = connection.createStatement()) {
+            Connection current = connection;
+            connection = null;
+            pgConnection = null;
+            if (current != null) {
+                try (Statement statement = current.createStatement()) {
                     statement.execute("UNLISTEN " + channel);
                 } catch (SQLException ignored) {
                 }
                 try {
-                    connection.close();
+                    current.close();
                 } catch (SQLException ignored) {
                 }
-                connection = null;
-                pgConnection = null;
             }
         }
     }

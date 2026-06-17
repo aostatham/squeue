@@ -352,6 +352,81 @@ class SequencedQueueDirectClientTest {
     }
 
     @Test
+    void notificationOptionsRejectUppercaseChannel() {
+        assertThrows(IllegalArgumentException.class, () -> PostgresNotificationOptions.enabled().channel("BadChannel"));
+    }
+
+    @Test
+    void notifyWorkerBuildDoesNotOpenListenerConnection() {
+        TrackingDataSource trackingDataSource = new TrackingDataSource(dataSource);
+        SequencedQueueDirectClient trackingClient = SequencedQueueDirectClient.builder()
+            .dataSource(trackingDataSource)
+            .defaultQueueName("wf.commands")
+            .build();
+
+        trackingClient.worker("wf.commands")
+            .workerId("notify-worker-build")
+            .handler("wf.command", item -> DirectQueueResult.success(Map.of()))
+            .waitStrategy(DirectWorkerWaitStrategy.postgresNotify())
+            .build();
+
+        assertEquals(0, trackingDataSource.connectionCount());
+    }
+
+    @Test
+    void notifyWorkerRunOnceDoesNotOpenWaitStrategy() {
+        CountingWaitStrategy waitStrategy = new CountingWaitStrategy();
+        SequencedQueueDirectWorker worker = client.worker("wf.commands")
+            .workerId("notify-worker-run-once")
+            .handler("wf.command", item -> DirectQueueResult.success(Map.of()))
+            .waitStrategy(waitStrategy)
+            .build();
+
+        assertFalse(worker.runOnce());
+
+        assertEquals(0, waitStrategy.openCalls());
+    }
+
+    @Test
+    void notifyWorkerRunForeverOpensAndClosesWaitStrategy() throws Exception {
+        CountingWaitStrategy waitStrategy = new CountingWaitStrategy();
+        SequencedQueueDirectWorker worker = client.worker("wf.commands")
+            .workerId("notify-worker-run-forever")
+            .handler("wf.command", item -> DirectQueueResult.success(Map.of()))
+            .waitStrategy(waitStrategy)
+            .build();
+        Thread workerThread = new Thread(worker::runForever, "notify-worker-lifecycle-test");
+        workerThread.start();
+        try {
+            assertTrue(waitStrategy.awaitOpened());
+        } finally {
+            worker.stop();
+            workerThread.join(2000);
+        }
+
+        assertFalse(workerThread.isAlive());
+        assertEquals(1, waitStrategy.openCalls());
+        assertEquals(1, waitStrategy.closeCalls());
+    }
+
+    @Test
+    void notifyWorkerDefaultFallbackStopsPromptlyWhileWaiting() throws Exception {
+        SequencedQueueDirectWorker worker = client.worker("wf.commands")
+            .workerId("notify-worker-stop")
+            .handler("wf.command", item -> DirectQueueResult.success(Map.of()))
+            .waitStrategy(DirectWorkerWaitStrategy.postgresNotify())
+            .build();
+        Thread workerThread = new Thread(worker::runForever, "notify-worker-stop-test");
+        workerThread.start();
+        Thread.sleep(500);
+
+        worker.stop();
+        workerThread.join(2000);
+
+        assertFalse(workerThread.isAlive());
+    }
+
+    @Test
     void notifyWorkerWakesWhenDirectEnqueueEmitsPgNotify() throws Exception {
         SequencedQueueDirectClient notifyingClient = notifyingClient();
         CountDownLatch handled = new CountDownLatch(1);
@@ -775,6 +850,50 @@ class SequencedQueueDirectClientTest {
         @Override
         public boolean isWrapperFor(Class<?> iface) throws SQLException {
             return delegate.isWrapperFor(iface);
+        }
+    }
+
+    private static final class CountingWaitStrategy implements DirectWorkerWaitStrategy {
+        private final CountDownLatch opened = new CountDownLatch(1);
+        private final AtomicInteger openCalls = new AtomicInteger();
+        private final AtomicInteger closeCalls = new AtomicInteger();
+        private volatile boolean closed;
+
+        @Override
+        public Waiter open(DataSource dataSource) {
+            openCalls.incrementAndGet();
+            opened.countDown();
+            return new Waiter() {
+                @Override
+                public void waitForWork(String queueName) {
+                    while (!closed) {
+                        try {
+                            Thread.sleep(10);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                    }
+                }
+
+                @Override
+                public void close() {
+                    closed = true;
+                    closeCalls.incrementAndGet();
+                }
+            };
+        }
+
+        boolean awaitOpened() throws InterruptedException {
+            return opened.await(5, TimeUnit.SECONDS);
+        }
+
+        int openCalls() {
+            return openCalls.get();
+        }
+
+        int closeCalls() {
+            return closeCalls.get();
         }
     }
 }

@@ -61,7 +61,9 @@ Deferred:
 - CLI
 - UI
 - batching
-- LISTEN/NOTIFY
+- REST/WebSocket/SSE worker wake-up
+- PostgreSQL `LISTEN/NOTIFY` as durable queue storage
+- database-trigger-based notification mechanisms
 - broker bridges
 - queue_config table
 - archive tables

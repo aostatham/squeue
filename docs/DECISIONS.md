@@ -102,7 +102,7 @@ When an `idempotencyKey` is supplied, enqueue is idempotent per `(queueName, ide
 
 Status: Accepted.
 
-The MVP is durable source-ordered work dispatch. It does not include broker semantics, pub/sub, fanout, priority queues, stream replay, consumer groups, CLI, UI, batching, `LISTEN/NOTIFY`, broker bridges, OAuth/OIDC, or archive tables.
+The MVP is durable source-ordered work dispatch. It does not include broker semantics, pub/sub, fanout, priority queues, stream replay, consumer groups, CLI, UI, batching, REST/WebSocket/SSE worker wake-up, `LISTEN/NOTIFY` as durable queue storage, broker bridges, OAuth/OIDC, or archive tables.
 
 ## SQ-016 - Use Docker-Backed Testcontainers PostgreSQL Tests for Correctness
 
@@ -177,7 +177,19 @@ Status: Accepted.
 
 Source ordering, leases, the head-item rule, dead-letter blocking, shared core, and PostgreSQL contract tests are non-negotiable.
 
-CLI, UI, batching, `LISTEN/NOTIFY`, broker bridges, benchmark harness, queue-level database configuration, full API-key lifecycle, OAuth/OIDC, and archive tables are deferred.
+CLI, UI, batching, REST/WebSocket/SSE worker wake-up, `LISTEN/NOTIFY` as durable queue storage, database-trigger-based notification mechanisms, broker bridges, benchmark harness, queue-level database configuration, full API-key lifecycle, OAuth/OIDC, and archive tables are deferred.
+
+## SQ-031 - Use Direct Java PostgreSQL Notify as a Wake-Up Hint Only
+
+Status: Accepted.
+
+Direct Java PostgreSQL `LISTEN/NOTIFY` worker wake-up is implemented as an optional direct-client efficiency feature.
+
+Notifications are wake-up hints only. Queue tables remain the durable source of truth, and workers still claim through the normal core claim path.
+
+Notification emission is best-effort. If `pg_notify` fails, the queue mutation should still commit when the queue state change itself succeeded and the transaction can be restored. Fallback safety sweeps tolerate missed notifications.
+
+REST/WebSocket/SSE worker wake-up remains post-MVP/full-distribution work.
 
 ## SQ-026 - Keep Retention Manual and Passable-Terminal Only
 
@@ -243,7 +255,9 @@ These are intentionally deferred, not part of the current MVP surface:
 - UI/admin console.
 - Batch claim and batch complete/fail.
 - Source draining.
-- PostgreSQL `LISTEN/NOTIFY` wake-ups.
+- REST/WebSocket/SSE worker wake-up.
+- PostgreSQL `LISTEN/NOTIFY` as durable queue storage.
+- Database-trigger-based notification mechanisms.
 - RabbitMQ/Kafka bridges.
 - Benchmark harness and published performance envelopes.
 - Queue-level database configuration.

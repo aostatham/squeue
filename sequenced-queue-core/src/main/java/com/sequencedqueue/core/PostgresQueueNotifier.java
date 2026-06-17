@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 public final class PostgresQueueNotifier implements QueueNotifier {
     public static final String DEFAULT_CHANNEL = "sequenced_queue_wakeup";
-    private static final Pattern CHANNEL_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]{0,62}$");
+    private static final Pattern CHANNEL_PATTERN = Pattern.compile("^[a-z_][a-z0-9_]{0,62}$");
 
     private final String channel;
     private final ObjectMapper objectMapper;

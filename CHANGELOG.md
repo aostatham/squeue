@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- Added optional PostgreSQL `LISTEN/NOTIFY` wake-up support for direct Java workers.
+- Added core notification abstraction and PostgreSQL notification emitter.
+- Added direct Java `PostgresNotificationOptions`.
+- Added direct worker `DirectWorkerWaitStrategy.postgresNotify()`.
+- Retained existing polling/backoff worker mode.
+- Kept notifications as wake-up hints only; queue tables remain the durable source of truth.
+- Added fallback safety sweep for missed notifications, listener reconnects, startup races, and retry-wait due times.
+- Added direct PostgreSQL notify documentation.
+- Added roadmap item for future REST/WebSocket/SSE worker wake-up.
+- No schema migration was added; schema baseline remains `V1`.
+- Queue ordering, lease, retry, recovery, and admin semantics are unchanged.
+
 ## v0.1.1
 
 Clarifies the MVP package boundary.
@@ -135,5 +147,5 @@ This release candidate is not a v1.0 production maturity claim. It establishes t
 - Delivery is at-least-once, not exactly-once. Handlers must be idempotent.
 - There is no global ordering across different sources.
 - There is no queue-level configuration table; queue configuration is global-only.
-- There is no CLI, UI, batching, source draining, LISTEN/NOTIFY, broker bridge, archive table, OAuth/OIDC, or database-backed API key lifecycle.
+- There is no CLI, UI, batching, source draining, REST/WebSocket/SSE worker wake-up, broker bridge, archive table, OAuth/OIDC, or database-backed API key lifecycle.
 - Direct Java access is trusted/internal only and bypasses REST API-key enforcement.

@@ -640,7 +640,7 @@ SequencedQueueDirectWorker worker = client.worker("wf.commands")
     .build();
 ```
 
-Notifications are wake-up hints only. The worker still claims through normal queue logic, keeps the fallback safety sweep, and reserves one PostgreSQL listener connection while running. Notification payloads exclude item payloads, headers, results, errors, admin reason, and admin metadata.
+Notifications are wake-up hints only. The worker still claims through normal queue logic, keeps the fallback safety sweep, and reserves one PostgreSQL listener connection only while `runForever()` is running. Notification emission is best-effort. Notification payloads exclude item payloads, headers, results, errors, admin reason, and admin metadata. REST/WebSocket/SSE worker wake-up remains roadmap work.
 
 ---
 

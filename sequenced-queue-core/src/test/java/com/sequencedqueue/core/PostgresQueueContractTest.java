@@ -387,8 +387,31 @@ class PostgresQueueContractTest {
     }
 
     @Test
-    void invalidNotificationChannelIsRejected() {
+    void notificationChannelValidationIsLowercaseOnly() {
+        assertEquals(PostgresQueueNotifier.DEFAULT_CHANNEL, PostgresQueueNotifier.onDefaultChannel().channel());
+        assertEquals("custom_wakeup_1", PostgresQueueNotifier.onChannel("custom_wakeup_1").channel());
+        assertThrows(IllegalArgumentException.class, () -> PostgresQueueNotifier.onChannel("BadChannel"));
         assertThrows(IllegalArgumentException.class, () -> PostgresQueueNotifier.onChannel("bad-channel"));
+        assertThrows(IllegalArgumentException.class, () -> PostgresQueueNotifier.onChannel(""));
+        assertThrows(IllegalArgumentException.class, () -> PostgresQueueNotifier.onChannel("a".repeat(64)));
+    }
+
+    @Test
+    void notificationFailureDoesNotRollbackQueueMutation() throws Exception {
+        QueueOperations bestEffortQueue = QueueCoreFactory.create(
+            dataSource,
+            new ObjectMapper(),
+            QueueSettings.defaults(),
+            (connection, event) -> {
+                throw new SQLException("notification failed");
+            }
+        );
+
+        EnqueueResponse enqueued = bestEffortQueue.enqueue(QUEUE, new EnqueueRequest("best-effort-source", "type", null, Map.of(), Map.of(), null, 5));
+
+        assertNotNull(enqueued.itemId());
+        assertEquals(1, count("queue_item"));
+        assertEquals("pending", scalar("SELECT status FROM queue_item WHERE item_id = '" + enqueued.itemId() + "'"));
     }
 
     @Test

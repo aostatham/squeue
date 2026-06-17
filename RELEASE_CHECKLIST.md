@@ -48,7 +48,9 @@ find . -path "*/db/migration/*" -type f | sort
 - UI
 - batching
 - source draining
-- LISTEN/NOTIFY
+- REST/WebSocket/SSE worker wake-up
+- PostgreSQL `LISTEN/NOTIFY` as durable queue storage
+- database-trigger-based notification mechanisms
 - broker bridges
 - queue-level database configuration
 - archive tables

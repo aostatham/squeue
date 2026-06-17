@@ -616,7 +616,7 @@ Oversized direct-client fields are rejected as `QueueFieldTooLargeException`, wh
 
 The direct worker helper uses short core transactions for claim and complete/fail. User handler code runs outside database transactions.
 
-Direct Java workers can optionally use PostgreSQL `LISTEN/NOTIFY` to avoid inefficient hot polling. This is a wake-up hint only; queue tables remain the durable source of truth and workers still claim through normal core claim logic. See [Direct PostgreSQL Notify Wake-Up](docs/direct-postgres-notify.md).
+Direct Java workers can optionally use PostgreSQL `LISTEN/NOTIFY` to avoid inefficient hot polling. This is a direct-client wake-up hint only; queue tables remain the durable source of truth and workers still claim through normal core claim logic. Notification emission is best-effort and REST/WebSocket/SSE worker wake-up remains roadmap work. See [Direct PostgreSQL Notify Wake-Up](docs/direct-postgres-notify.md).
 
 ---
 

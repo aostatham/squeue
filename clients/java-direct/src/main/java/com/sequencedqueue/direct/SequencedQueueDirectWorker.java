@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import javax.sql.DataSource;
+
 import com.sequencedqueue.worker.QueueWorkerEngine;
 import com.sequencedqueue.worker.QueueWorkerEngine.Claim;
 import com.sequencedqueue.worker.QueueWorkerEngine.ClaimCommand;
@@ -15,12 +17,15 @@ import com.sequencedqueue.worker.QueueWorkerEngine.HeartbeatCommand;
 
 public final class SequencedQueueDirectWorker implements AutoCloseable {
     private final QueueWorkerEngine<ClaimItem, DirectQueueResult> engine;
-    private final DirectWorkerWaitStrategy.Waiter waiter;
+    private final DirectWorkerWaitStrategy waitStrategy;
+    private final DataSource dataSource;
+    private volatile DirectWorkerWaitStrategy.Waiter waiter;
     private volatile boolean running = true;
 
     private SequencedQueueDirectWorker(Builder builder) {
         DirectWorkerTransport transport = new ClientDirectWorkerTransport(builder.client);
-        this.waiter = builder.waitStrategy == null ? null : builder.waitStrategy.open(builder.client.dataSource());
+        this.waitStrategy = builder.waitStrategy;
+        this.dataSource = builder.client.dataSource();
         this.engine = engine(
             transport,
             QueueWorkerEngine.scheduledLeaseMonitorFactory(transport),
@@ -41,7 +46,8 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
         int leaseSeconds,
         Map<String, Function<ClaimItem, DirectQueueResult>> handlers
     ) {
-        this.waiter = null;
+        this.waitStrategy = null;
+        this.dataSource = null;
         this.engine = engine(transport, leaseMonitorFactory, queueName, workerId, supportedItemTypes, leaseSeconds, handlers);
     }
 
@@ -72,23 +78,33 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
     }
 
     public void runForever() {
-        if (waiter == null) {
+        if (waitStrategy == null) {
             engine.runForever();
             return;
         }
-        while (running && !Thread.currentThread().isInterrupted()) {
-            try {
+        if (!running) {
+            return;
+        }
+        DirectWorkerWaitStrategy.Waiter openedWaiter = waitStrategy.open(dataSource);
+        waiter = openedWaiter;
+        try {
+            while (running && !Thread.currentThread().isInterrupted()) {
                 while (running && engine.runOnce()) {
                     // Drain currently available work using the normal claim path before waiting.
                 }
                 if (running) {
-                    waiter.waitForWork(engineQueueName());
+                    openedWaiter.waitForWork(engineQueueName());
                 }
-            } catch (RuntimeException e) {
-                if (!running || Thread.currentThread().isInterrupted()) {
-                    return;
-                }
-                throw e;
+            }
+        } catch (RuntimeException e) {
+            if (!running || Thread.currentThread().isInterrupted()) {
+                return;
+            }
+            throw e;
+        } finally {
+            openedWaiter.close();
+            if (waiter == openedWaiter) {
+                waiter = null;
             }
         }
     }

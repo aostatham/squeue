@@ -18,6 +18,11 @@ class ProductionSqlLocationTest {
         "ALTER TABLE",
         "FOR UPDATE"
     );
+    private static final List<String> LISTENER_SQL_TOKENS = List.of(
+        "LISTEN ",
+        "UNLISTEN "
+    );
+    private static final String ALLOWED_DIRECT_NOTIFY_LISTENER = "/clients/java-direct/src/main/java/com/sequencedqueue/direct/PostgresNotifyWorkerWaitStrategy.java";
 
     @Test
     void productionSqlExistsOnlyInCoreModule() throws Exception {
@@ -29,20 +34,27 @@ class ProductionSqlLocationTest {
                 .filter(path -> path.toString().contains("/src/main/"))
                 .filter(path -> !path.toString().contains("/sequenced-queue-core/"))
                 .filter(path -> path.toString().endsWith(".java") || path.toString().endsWith(".sql") || path.toString().endsWith(".yaml") || path.toString().endsWith(".yml"))
-                .filter(ProductionSqlLocationTest::containsSqlToken)
+                .filter(ProductionSqlLocationTest::containsDisallowedSql)
                 .toList();
         }
 
-        assertTrue(offenders.isEmpty(), "production SQL must stay in sequenced-queue-core: " + offenders);
+        assertTrue(offenders.isEmpty(), "production queue SQL must stay in sequenced-queue-core; direct Java may only contain LISTEN/UNLISTEN in the notify wait strategy: " + offenders);
     }
 
-    private static boolean containsSqlToken(Path path) {
+    private static boolean containsDisallowedSql(Path path) {
         try {
             String text = Files.readString(path).toUpperCase();
-            return SQL_TOKENS.stream().anyMatch(text::contains);
+            if (SQL_TOKENS.stream().anyMatch(text::contains)) {
+                return true;
+            }
+            return LISTENER_SQL_TOKENS.stream().anyMatch(text::contains) && !isAllowedDirectNotifyListener(path);
         } catch (Exception e) {
             throw new IllegalStateException("could not read " + path, e);
         }
+    }
+
+    private static boolean isAllowedDirectNotifyListener(Path path) {
+        return path.toString().replace('\\', '/').endsWith(ALLOWED_DIRECT_NOTIFY_LISTENER);
     }
 
     private static Path repoRoot() {
