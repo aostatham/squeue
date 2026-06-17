@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>com.example</groupId>
+    <groupId>com.jdansoft</groupId>
     <artifactId>sequenced-queue</artifactId>
     <version>0.1.0</version>
     <relativePath>../../pom.xml</relativePath>
@@ -16,7 +16,7 @@
 
   <dependencies>
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.jdansoft</groupId>
       <artifactId>sequenced-queue-java-direct-client</artifactId>
       <version>${project.version}</version>
     </dependency>

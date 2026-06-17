@@ -20,7 +20,7 @@ The direct Java client validates that the database schema is compatible with the
 
 ## Artifacts
 
-Maven artifacts currently use groupId `com.example` and version `0.1.0`.
+Maven artifacts currently use groupId `com.jdansoft` and version `0.1.0`.
 
 | Module path | Maven artifactId | Notes |
 | --- | --- | --- |
