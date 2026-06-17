@@ -97,9 +97,9 @@ Example Maven dependency:
 
 ```xml
 <dependency>
-  <groupId>com.sequencedqueue</groupId>
+  <groupId>com.jdansoft</groupId>
   <artifactId>sequenced-queue-core</artifactId>
-  <version>0.1.1</version>
+  <version>0.1.0</version>
 </dependency>
 ```
 
@@ -126,9 +126,9 @@ Example Maven dependency:
 
 ```xml
 <dependency>
-  <groupId>com.sequencedqueue</groupId>
+  <groupId>com.jdansoft</groupId>
   <artifactId>sequenced-queue-java-direct-client</artifactId>
-  <version>0.1.1</version>
+  <version>0.1.0</version>
 </dependency>
 ```
 
@@ -620,6 +620,27 @@ wf-123 command 1 and wf-123 command 2 processing concurrently
 ```
 
 This is the key benefit for workflow command processing.
+
+Direct Java workers can optionally use PostgreSQL `LISTEN/NOTIFY` as a wake-up hint:
+
+```java
+SequencedQueueDirectClient client = SequencedQueueDirectClient.builder()
+    .dataSource(dataSource)
+    .validateSchemaOnBuild(true)
+    .postgresNotifications(PostgresNotificationOptions.enabled()
+        .channel("sequenced_queue_wakeup"))
+    .build();
+
+SequencedQueueDirectWorker worker = client.worker("wf.commands")
+    .workerId("wf-command-worker-1")
+    .handler("wf.command", handler)
+    .waitStrategy(DirectWorkerWaitStrategy.postgresNotify()
+        .channel("sequenced_queue_wakeup")
+        .fallbackPollInterval(Duration.ofSeconds(30)))
+    .build();
+```
+
+Notifications are wake-up hints only. The worker still claims through normal queue logic, keeps the fallback safety sweep, and reserves one PostgreSQL listener connection while running. Notification payloads exclude item payloads, headers, results, errors, admin reason, and admin metadata.
 
 ---
 

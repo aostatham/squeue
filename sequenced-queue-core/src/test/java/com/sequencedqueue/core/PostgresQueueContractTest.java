@@ -34,6 +34,8 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.postgresql.PGConnection;
+import org.postgresql.PGNotification;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -359,6 +361,92 @@ class PostgresQueueContractTest {
     }
 
     @Test
+    void enqueueEmitsNotificationAfterCommit() throws Exception {
+        QueueOperations notifyingQueue = QueueCoreFactory.create(dataSource, new ObjectMapper(), QueueSettings.defaults(), PostgresQueueNotifier.onDefaultChannel());
+        try (Connection listener = listen()) {
+            notifyingQueue.enqueue(QUEUE, new EnqueueRequest("notify-source", "type", null, Map.of(), Map.of(), null, 5));
+
+            String payload = nextNotification(listener);
+
+            assertTrue(payload.contains("\"queueName\":\"" + QUEUE + "\""));
+            assertTrue(payload.contains("\"reason\":\"ENQUEUE\""));
+            assertFalse(payload.contains("notify-source"));
+        }
+    }
+
+    @Test
+    void manualRollbackDoesNotDeliverNotification() throws Exception {
+        try (Connection listener = listen();
+             Connection sender = dataSource.getConnection()) {
+            sender.setAutoCommit(false);
+            PostgresQueueNotifier.onDefaultChannel().notifyWorkAvailable(sender, new QueueWakeupEvent(QUEUE, QueueWakeupReason.ENQUEUE));
+            sender.rollback();
+
+            assertEquals(null, maybeNextNotification(listener, 500));
+        }
+    }
+
+    @Test
+    void invalidNotificationChannelIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> PostgresQueueNotifier.onChannel("bad-channel"));
+    }
+
+    @Test
+    void adminOperationsEmitNotifications() throws Exception {
+        QueueOperations notifyingQueue = QueueCoreFactory.create(dataSource, new ObjectMapper(), QueueSettings.defaults(), PostgresQueueNotifier.onDefaultChannel());
+        try (Connection listener = listen()) {
+            EnqueueResponse retry = notifyingQueue.enqueue(QUEUE, new EnqueueRequest("retry-source", "type", null, Map.of(), Map.of(), null, 1));
+            ClaimResponse retryClaim = notifyingQueue.claim(QUEUE, new ClaimRequest("worker-1", List.of("type"), 60, 1));
+            notifyingQueue.fail(QUEUE, retryClaim.items().getFirst().itemId(), new FailRequest("worker-1", retryClaim.leaseId(), true, "ERR", "failed", null));
+            drainNotifications(listener);
+
+            notifyingQueue.retry(QUEUE, retry.itemId(), "admin", "retry");
+            assertTrue(nextNotification(listener).contains("\"reason\":\"ADMIN_RETRY\""));
+            execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
+            drainNotifications(listener);
+
+            EnqueueResponse skip = notifyingQueue.enqueue(QUEUE, new EnqueueRequest("skip-source", "type", null, Map.of(), Map.of(), null, 1));
+            ClaimResponse skipClaim = notifyingQueue.claim(QUEUE, new ClaimRequest("worker-2", List.of("type"), 60, 1));
+            notifyingQueue.fail(QUEUE, skipClaim.items().getFirst().itemId(), new FailRequest("worker-2", skipClaim.leaseId(), true, "ERR", "failed", null));
+            drainNotifications(listener);
+            notifyingQueue.skip(QUEUE, skip.itemId(), "admin", "skip");
+            assertTrue(nextNotification(listener).contains("\"reason\":\"ADMIN_SKIP\""));
+            execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
+            drainNotifications(listener);
+
+            EnqueueResponse cancel = notifyingQueue.enqueue(QUEUE, new EnqueueRequest("cancel-source", "type", null, Map.of(), Map.of(), null, 5));
+            drainNotifications(listener);
+            notifyingQueue.cancel(QUEUE, cancel.itemId(), "admin", "cancel");
+            assertTrue(nextNotification(listener).contains("\"reason\":\"ADMIN_CANCEL\""));
+            execute("TRUNCATE queue_admin_audit, queue_item, queue_source_state");
+            drainNotifications(listener);
+
+            notifyingQueue.enqueue(QUEUE, new EnqueueRequest("unblock-source", "type", null, Map.of(), Map.of(), null, 5));
+            execute("UPDATE queue_item SET status = 'skipped' WHERE source_id = 'unblock-source'");
+            execute("UPDATE queue_source_state SET status = 'blocked' WHERE source_id = 'unblock-source'");
+            drainNotifications(listener);
+            notifyingQueue.unblockSource(QUEUE, "unblock-source", "admin", "unblock");
+            assertTrue(nextNotification(listener).contains("\"reason\":\"ADMIN_UNBLOCK\""));
+        }
+    }
+
+    @Test
+    void leaseRecoveryEmitsNotificationWhenItMutatesWork() throws Exception {
+        QueueOperations notifyingQueue = QueueCoreFactory.create(dataSource, new ObjectMapper(), QueueSettings.defaults(), PostgresQueueNotifier.onDefaultChannel());
+        try (Connection listener = listen()) {
+            notifyingQueue.enqueue(QUEUE, new EnqueueRequest("recovery-source", "type", null, Map.of(), Map.of(), null, 5));
+            ClaimResponse claim = notifyingQueue.claim(QUEUE, new ClaimRequest("worker-1", List.of("type"), 60, 1));
+            assertFalse(claim.items().isEmpty());
+            expireLeases();
+            drainNotifications(listener);
+
+            assertEquals(1, notifyingQueue.recoverExpiredLeases());
+
+            assertTrue(nextNotification(listener).contains("\"reason\":\"RECOVERY\""));
+        }
+    }
+
+    @Test
     void adminSkipCancelAndUnblockWriteAudit() throws Exception {
         UUID skipped = enqueue("skip-source", 1).itemId();
         ClaimResponse skipClaim = claim("worker-1");
@@ -634,6 +722,32 @@ class PostgresQueueContractTest {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("SELECT lease_until FROM queue_item WHERE sequence_no = 1")) {
             rs.next();
             return rs.getObject(1, OffsetDateTime.class);
+        }
+    }
+
+    private static Connection listen() throws Exception {
+        Connection connection = dataSource.getConnection();
+        connection.setAutoCommit(true);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("LISTEN " + PostgresQueueNotifier.DEFAULT_CHANNEL);
+        }
+        return connection;
+    }
+
+    private static String nextNotification(Connection listener) throws Exception {
+        String payload = maybeNextNotification(listener, 5000);
+        assertNotNull(payload);
+        return payload;
+    }
+
+    private static String maybeNextNotification(Connection listener, int timeoutMillis) throws Exception {
+        PGNotification[] notifications = listener.unwrap(PGConnection.class).getNotifications(timeoutMillis);
+        return notifications == null || notifications.length == 0 ? null : notifications[0].getParameter();
+    }
+
+    private static void drainNotifications(Connection listener) throws Exception {
+        while (maybeNextNotification(listener, 100) != null) {
+            // Drain prior enqueue/fail wake-ups so the next assertion targets the operation under test.
         }
     }
 

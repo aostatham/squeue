@@ -170,7 +170,7 @@ Explicitly deferred from Stage 3A:
 - UI
 - batching
 - source draining
-- PostgreSQL `LISTEN/NOTIFY`
+- REST/WebSocket/SSE worker wake-up
 - RabbitMQ/Kafka bridge
 - benchmark harness
 - queue-level database configuration
@@ -204,10 +204,33 @@ Potential later work:
 - published throughput/latency envelopes
 - index tuning
 - optional batching
-- optional `LISTEN/NOTIFY` wake-up
+- REST/WebSocket/SSE worker wake-up design
 - partitioning/archive strategy
 
 Batch claim and batch complete/fail are not implemented now.
+
+## Post-MVP REST Worker Wake-Up
+
+Direct Java workers can use PostgreSQL `LISTEN/NOTIFY` as an optional wake-up strategy because they have database access.
+
+Pure REST clients cannot consume PostgreSQL notifications directly without also having database access. A future REST/full-distribution enhancement should provide an HTTP-native wake-up mechanism for REST workers.
+
+Candidate approaches:
+
+- long-poll claim endpoint
+- Server-Sent Events
+- WebSocket worker notification channel
+
+Design requirements:
+
+- queue tables remain the durable source of truth
+- notifications are wake-up hints only
+- clients must still claim through the normal REST claim endpoint
+- missed notifications must be tolerated with fallback polling/safety sweeps
+- authorization must use the existing worker/admin security model or its successor
+- no exactly-once side-effect guarantee is implied
+
+This is post-MVP/full-distribution work and is outside the core/direct Java MVP package boundary.
 
 ## Stage 5 - Productisation and Ecosystem
 

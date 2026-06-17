@@ -9,8 +9,10 @@ import javax.sql.DataSource;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sequencedqueue.core.NoopQueueNotifier;
 import com.sequencedqueue.core.QueueCoreFactory;
 import com.sequencedqueue.core.QueueDtos;
+import com.sequencedqueue.core.QueueNotifier;
 import com.sequencedqueue.core.QueueOperations;
 
 /**
@@ -33,15 +35,19 @@ public class SequencedQueueDirectClient {
     private final ObjectMapper objectMapper;
     /** Shared core implementation used for all queue semantics. */
     private final QueueOperations queueOperations;
+    /** Data source used by direct workers for ordinary operations and optional notification listening. */
+    private final DataSource dataSource;
 
     /**
      * Creates a direct client from builder settings.
      */
     private SequencedQueueDirectClient(Builder builder) {
         DataSource dataSource = Objects.requireNonNull(builder.dataSource, "dataSource is required");
+        QueueNotifier queueNotifier = builder.notificationOptions == null ? NoopQueueNotifier.INSTANCE : builder.notificationOptions.queueNotifier();
+        this.dataSource = dataSource;
         this.defaultQueueName = builder.defaultQueueName;
         this.objectMapper = builder.objectMapper == null ? new ObjectMapper() : builder.objectMapper;
-        this.queueOperations = QueueCoreFactory.create(dataSource, this.objectMapper, 60, DEFAULT_MAX_ATTEMPTS);
+        this.queueOperations = QueueCoreFactory.create(dataSource, this.objectMapper, com.sequencedqueue.core.QueueSettings.defaults(), queueNotifier);
         if (builder.validateSchemaOnBuild) {
             validateSchemaCompatibility();
         }
@@ -242,6 +248,10 @@ public class SequencedQueueDirectClient {
         return SequencedQueueDirectWorker.builder(this, queueName);
     }
 
+    DataSource dataSource() {
+        return dataSource;
+    }
+
     /**
      * Converts direct enqueue JSON strings into core map DTOs.
      */
@@ -353,6 +363,8 @@ public class SequencedQueueDirectClient {
         private ObjectMapper objectMapper;
         /** Whether to validate Flyway schema compatibility during build. */
         private boolean validateSchemaOnBuild;
+        /** Optional PostgreSQL notification emission settings. */
+        private PostgresNotificationOptions notificationOptions;
 
         /**
          * Sets the PostgreSQL data source.
@@ -383,6 +395,14 @@ public class SequencedQueueDirectClient {
          */
         public Builder validateSchemaOnBuild(boolean validateSchemaOnBuild) {
             this.validateSchemaOnBuild = validateSchemaOnBuild;
+            return this;
+        }
+
+        /**
+         * Enables PostgreSQL notification emission from mutating direct-client operations.
+         */
+        public Builder postgresNotifications(PostgresNotificationOptions notificationOptions) {
+            this.notificationOptions = Objects.requireNonNull(notificationOptions, "notificationOptions is required");
             return this;
         }
 

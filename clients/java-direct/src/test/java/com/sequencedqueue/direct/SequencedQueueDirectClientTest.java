@@ -11,6 +11,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -19,6 +20,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 import javax.sql.DataSource;
@@ -30,6 +33,10 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+
+import com.sequencedqueue.core.PostgresQueueNotifier;
+import com.sequencedqueue.core.QueueWakeupEvent;
+import com.sequencedqueue.core.QueueWakeupReason;
 
 /**
  * Test coverage for SequencedQueueDirectClientTest.
@@ -344,6 +351,246 @@ class SequencedQueueDirectClientTest {
         assertEquals("succeeded", itemStatus(enqueued.itemId()));
     }
 
+    @Test
+    void notifyWorkerWakesWhenDirectEnqueueEmitsPgNotify() throws Exception {
+        SequencedQueueDirectClient notifyingClient = notifyingClient();
+        CountDownLatch handled = new CountDownLatch(1);
+        SequencedQueueDirectWorker worker = notifyingClient.worker("wf.commands")
+            .workerId("notify-worker-1")
+            .handler("wf.command", item -> {
+                handled.countDown();
+                return DirectQueueResult.success(Map.of("mode", "notify"));
+            })
+            .waitStrategy(DirectWorkerWaitStrategy.postgresNotify()
+                .fallbackPollInterval(Duration.ofSeconds(5)))
+            .build();
+        Thread workerThread = new Thread(worker::runForever, "notify-worker-test");
+        workerThread.start();
+        try {
+            Thread.sleep(300);
+            EnqueueResponse enqueued = notifyingClient.enqueue("wf.commands", EnqueueRequest.builder()
+                .sourceId("notify-source")
+                .itemType("wf.command")
+                .payloadJson("{}")
+                .headersJson("{}")
+                .build());
+
+            assertTrue(handled.await(5, TimeUnit.SECONDS));
+            assertEventuallyStatus(enqueued.itemId(), "succeeded");
+        } finally {
+            worker.stop();
+            workerThread.join(5000);
+        }
+    }
+
+    @Test
+    void notifyWorkerProcessesAlreadyExistingWorkBeforeWaiting() throws Exception {
+        SequencedQueueDirectClient notifyingClient = notifyingClient();
+        EnqueueResponse enqueued = notifyingClient.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("notify-existing")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        CountDownLatch handled = new CountDownLatch(1);
+        SequencedQueueDirectWorker worker = notifyingClient.worker("wf.commands")
+            .workerId("notify-worker-2")
+            .handler("wf.command", item -> {
+                handled.countDown();
+                return DirectQueueResult.success(Map.of());
+            })
+            .waitStrategy(DirectWorkerWaitStrategy.postgresNotify()
+                .fallbackPollInterval(Duration.ofSeconds(5)))
+            .build();
+        Thread workerThread = new Thread(worker::runForever, "notify-worker-existing-test");
+        workerThread.start();
+        try {
+            assertTrue(handled.await(5, TimeUnit.SECONDS));
+            assertEventuallyStatus(enqueued.itemId(), "succeeded");
+        } finally {
+            worker.stop();
+            workerThread.join(5000);
+        }
+    }
+
+    @Test
+    void notifyWorkerFallbackProcessesWorkWithoutNotification() throws Exception {
+        SequencedQueueDirectClient notifyingClient = notifyingClient();
+        CountDownLatch handled = new CountDownLatch(1);
+        SequencedQueueDirectWorker worker = notifyingClient.worker("wf.commands")
+            .workerId("notify-worker-3")
+            .handler("wf.command", item -> {
+                handled.countDown();
+                return DirectQueueResult.success(Map.of());
+            })
+            .waitStrategy(DirectWorkerWaitStrategy.postgresNotify()
+                .fallbackPollInterval(Duration.ofMillis(200)))
+            .build();
+        Thread workerThread = new Thread(worker::runForever, "notify-worker-fallback-test");
+        workerThread.start();
+        try {
+            Thread.sleep(300);
+            EnqueueResponse enqueued = client.enqueue("wf.commands", EnqueueRequest.builder()
+                .sourceId("notify-fallback")
+                .itemType("wf.command")
+                .payloadJson("{}")
+                .headersJson("{}")
+                .build());
+
+            assertTrue(handled.await(5, TimeUnit.SECONDS));
+            assertEventuallyStatus(enqueued.itemId(), "succeeded");
+        } finally {
+            worker.stop();
+            workerThread.join(5000);
+        }
+    }
+
+    @Test
+    void notifyWaiterIgnoresOtherQueueNames() throws Exception {
+        DirectWorkerWaitStrategy.Waiter waiter = DirectWorkerWaitStrategy.postgresNotify()
+            .fallbackPollInterval(Duration.ofMillis(400))
+            .open(dataSource);
+        try {
+            notifyWakeup("other.queue");
+
+            long ignoredStart = System.nanoTime();
+            waiter.waitForWork("wf.commands");
+            long ignoredMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - ignoredStart);
+
+            notifyWakeup("wf.commands");
+            long matchedStart = System.nanoTime();
+            waiter.waitForWork("wf.commands");
+            long matchedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - matchedStart);
+
+            assertTrue(ignoredMillis >= 250);
+            assertTrue(matchedMillis < 250);
+        } finally {
+            waiter.close();
+        }
+    }
+
+    @Test
+    void notifyWaiterReconnectsForSafetySweepAfterListenerConnectionCloses() throws Exception {
+        TrackingDataSource trackingDataSource = new TrackingDataSource(dataSource);
+        DirectWorkerWaitStrategy.Waiter waiter = DirectWorkerWaitStrategy.postgresNotify()
+            .fallbackPollInterval(Duration.ofSeconds(1))
+            .open(trackingDataSource);
+        try {
+            trackingDataSource.lastConnection().close();
+
+            waiter.waitForWork("wf.commands");
+
+            assertTrue(trackingDataSource.connectionCount() >= 2);
+        } finally {
+            waiter.close();
+        }
+    }
+
+    @Test
+    void notifyWorkersPreserveSameSourceNonConcurrency() throws Exception {
+        SequencedQueueDirectClient notifyingClient = notifyingClient();
+        EnqueueResponse first = notifyingClient.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("same-source-notify")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        EnqueueResponse second = notifyingClient.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("same-source-notify")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        SequencedQueueDirectWorker workerOne = notifyWorker(notifyingClient, "notify-worker-same-1", item -> {
+            if (item.sequenceNo() == 1) {
+                firstStarted.countDown();
+                await(releaseFirst);
+            } else {
+                secondStarted.countDown();
+            }
+            return DirectQueueResult.success(Map.of());
+        });
+        SequencedQueueDirectWorker workerTwo = notifyWorker(notifyingClient, "notify-worker-same-2", item -> {
+            if (item.sequenceNo() == 1) {
+                firstStarted.countDown();
+                await(releaseFirst);
+            } else {
+                secondStarted.countDown();
+            }
+            return DirectQueueResult.success(Map.of());
+        });
+        Thread threadOne = new Thread(workerOne::runForever, "notify-worker-same-1");
+        Thread threadTwo = new Thread(workerTwo::runForever, "notify-worker-same-2");
+        threadOne.start();
+        threadTwo.start();
+        try {
+            assertTrue(firstStarted.await(5, TimeUnit.SECONDS));
+            assertFalse(secondStarted.await(500, TimeUnit.MILLISECONDS));
+
+            releaseFirst.countDown();
+
+            assertTrue(secondStarted.await(5, TimeUnit.SECONDS));
+            assertEventuallyStatus(first.itemId(), "succeeded");
+            assertEventuallyStatus(second.itemId(), "succeeded");
+        } finally {
+            releaseFirst.countDown();
+            workerOne.stop();
+            workerTwo.stop();
+            threadOne.join(5000);
+            threadTwo.join(5000);
+        }
+    }
+
+    @Test
+    void notifyWorkersAllowDifferentSourceConcurrency() throws Exception {
+        SequencedQueueDirectClient notifyingClient = notifyingClient();
+        EnqueueResponse first = notifyingClient.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("different-source-notify-1")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        EnqueueResponse second = notifyingClient.enqueue("wf.commands", EnqueueRequest.builder()
+            .sourceId("different-source-notify-2")
+            .itemType("wf.command")
+            .payloadJson("{}")
+            .headersJson("{}")
+            .build());
+        CountDownLatch bothStarted = new CountDownLatch(2);
+        CountDownLatch releaseBoth = new CountDownLatch(1);
+        SequencedQueueDirectWorker workerOne = notifyWorker(notifyingClient, "notify-worker-different-1", item -> {
+            bothStarted.countDown();
+            await(releaseBoth);
+            return DirectQueueResult.success(Map.of());
+        });
+        SequencedQueueDirectWorker workerTwo = notifyWorker(notifyingClient, "notify-worker-different-2", item -> {
+            bothStarted.countDown();
+            await(releaseBoth);
+            return DirectQueueResult.success(Map.of());
+        });
+        Thread threadOne = new Thread(workerOne::runForever, "notify-worker-different-1");
+        Thread threadTwo = new Thread(workerTwo::runForever, "notify-worker-different-2");
+        threadOne.start();
+        threadTwo.start();
+        try {
+            assertTrue(bothStarted.await(5, TimeUnit.SECONDS));
+
+            releaseBoth.countDown();
+
+            assertEventuallyStatus(first.itemId(), "succeeded");
+            assertEventuallyStatus(second.itemId(), "succeeded");
+        } finally {
+            releaseBoth.countDown();
+            workerOne.stop();
+            workerTwo.stop();
+            threadOne.join(5000);
+            threadTwo.join(5000);
+        }
+    }
+
     private static void applySchema(DataSource dataSource) throws Exception {
         Flyway.configure()
             .dataSource(dataSource)
@@ -359,6 +606,43 @@ class SequencedQueueDirectClientTest {
         }
     }
 
+    private static SequencedQueueDirectClient notifyingClient() {
+        return SequencedQueueDirectClient.builder()
+            .dataSource(dataSource)
+            .defaultQueueName("wf.commands")
+            .validateSchemaOnBuild(true)
+            .postgresNotifications(PostgresNotificationOptions.enabled())
+            .build();
+    }
+
+    private static SequencedQueueDirectWorker notifyWorker(
+        SequencedQueueDirectClient notifyingClient,
+        String workerId,
+        java.util.function.Function<ClaimItem, DirectQueueResult> handler
+    ) {
+        return notifyingClient.worker("wf.commands")
+            .workerId(workerId)
+            .handler("wf.command", handler)
+            .waitStrategy(DirectWorkerWaitStrategy.postgresNotify()
+                .fallbackPollInterval(Duration.ofMillis(200)))
+            .build();
+    }
+
+    private static void notifyWakeup(String queueName) throws Exception {
+        try (Connection connection = dataSource.getConnection()) {
+            PostgresQueueNotifier.onDefaultChannel().notifyWorkAvailable(connection, new QueueWakeupEvent(queueName, QueueWakeupReason.ENQUEUE));
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            assertTrue(latch.await(5, TimeUnit.SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(e);
+        }
+    }
+
     private static String itemStatus(java.util.UUID itemId) {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement();
@@ -368,6 +652,16 @@ class SequencedQueueDirectClientTest {
         } catch (SQLException e) {
             throw new AssertionError(e);
         }
+    }
+
+    private static void assertEventuallyStatus(java.util.UUID itemId, String expectedStatus) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        String status = itemStatus(itemId);
+        while (!expectedStatus.equals(status) && System.nanoTime() < deadline) {
+            Thread.sleep(25);
+            status = itemStatus(itemId);
+        }
+        assertEquals(expectedStatus, status);
     }
 
     private record DriverManagerDataSource(String url, String username, String password) implements DataSource {
@@ -412,6 +706,75 @@ class SequencedQueueDirectClientTest {
         @Override
         public boolean isWrapperFor(Class<?> iface) {
             return false;
+        }
+    }
+
+    private static final class TrackingDataSource implements DataSource {
+        private final DataSource delegate;
+        private final List<Connection> connections = new ArrayList<>();
+        private final AtomicInteger connectionCount = new AtomicInteger();
+
+        private TrackingDataSource(DataSource delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public Connection getConnection() throws SQLException {
+            Connection connection = delegate.getConnection();
+            connections.add(connection);
+            connectionCount.incrementAndGet();
+            return connection;
+        }
+
+        @Override
+        public Connection getConnection(String username, String password) throws SQLException {
+            Connection connection = delegate.getConnection(username, password);
+            connections.add(connection);
+            connectionCount.incrementAndGet();
+            return connection;
+        }
+
+        Connection lastConnection() {
+            return connections.getLast();
+        }
+
+        int connectionCount() {
+            return connectionCount.get();
+        }
+
+        @Override
+        public PrintWriter getLogWriter() throws SQLException {
+            return delegate.getLogWriter();
+        }
+
+        @Override
+        public void setLogWriter(PrintWriter out) throws SQLException {
+            delegate.setLogWriter(out);
+        }
+
+        @Override
+        public void setLoginTimeout(int seconds) throws SQLException {
+            delegate.setLoginTimeout(seconds);
+        }
+
+        @Override
+        public int getLoginTimeout() throws SQLException {
+            return delegate.getLoginTimeout();
+        }
+
+        @Override
+        public Logger getParentLogger() throws SQLFeatureNotSupportedException {
+            return delegate.getParentLogger();
+        }
+
+        @Override
+        public <T> T unwrap(Class<T> iface) throws SQLException {
+            return delegate.unwrap(iface);
+        }
+
+        @Override
+        public boolean isWrapperFor(Class<?> iface) throws SQLException {
+            return delegate.isWrapperFor(iface);
         }
     }
 }

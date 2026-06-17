@@ -7,9 +7,11 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.nio.charset.StandardCharsets;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -42,6 +44,10 @@ public class DefaultQueueService implements QueueOperations {
     private final Clock clock;
     /** Global queue settings and limits. */
     private final QueueSettings settings;
+    /** Optional wake-up notifier for claimable-work hints. */
+    private final QueueNotifier queueNotifier;
+    /** Supplies the active transaction connection for in-transaction notifications. */
+    private final SqlConnectionProvider connectionProvider;
 
     /**
      * Creates a service with legacy lease and attempt settings plus other defaults.
@@ -63,12 +69,21 @@ public class DefaultQueueService implements QueueOperations {
      * Creates a service with explicit dependencies and global settings.
      */
     public DefaultQueueService(QueueRepository repository, TransactionRunner transactions, RetryPolicy retryPolicy, ObjectMapper objectMapper, Clock clock, QueueSettings settings) {
+        this(repository, transactions, retryPolicy, objectMapper, clock, settings, NoopQueueNotifier.INSTANCE, transactions instanceof SqlConnectionProvider provider ? provider : null);
+    }
+
+    /**
+     * Creates a service with optional in-transaction wake-up notification support.
+     */
+    public DefaultQueueService(QueueRepository repository, TransactionRunner transactions, RetryPolicy retryPolicy, ObjectMapper objectMapper, Clock clock, QueueSettings settings, QueueNotifier queueNotifier, SqlConnectionProvider connectionProvider) {
         this.repository = repository;
         this.transactions = transactions;
         this.retryPolicy = retryPolicy;
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.settings = settings;
+        this.queueNotifier = queueNotifier == null ? NoopQueueNotifier.INSTANCE : queueNotifier;
+        this.connectionProvider = connectionProvider;
     }
 
     /**
@@ -211,6 +226,7 @@ public class DefaultQueueService implements QueueOperations {
             repository.releaseSource(queueName, sourceId, now);
             SourceStateRow released = repository.findSource(queueName, sourceId);
             insertAudit(actorId, "unblock", queueName, sourceId, null, source.status().name(), released.status().name(), reason, Map.of());
+            notifyWorkAvailable(queueName, QueueWakeupReason.ADMIN_UNBLOCK);
             return toSourceResponse(released);
         });
     }
@@ -318,10 +334,15 @@ public class DefaultQueueService implements QueueOperations {
         return transactions.inTransaction(() -> {
             OffsetDateTime now = now();
             int recovered = 0;
+            Set<String> recoveredQueues = new HashSet<>();
             for (QueueItemRow candidate : repository.expiredProcessing(now, 100)) {
                 if (recoverExpiredItem(candidate, now)) {
                     recovered++;
+                    recoveredQueues.add(candidate.queueName());
                 }
+            }
+            for (String recoveredQueue : recoveredQueues) {
+                notifyWorkAvailable(recoveredQueue, QueueWakeupReason.RECOVERY);
             }
             return recovered;
         });
@@ -374,6 +395,7 @@ public class DefaultQueueService implements QueueOperations {
         repository.incrementNextSequence(queueName, request.sourceId(), now);
 
         QueueItemRow item = repository.insertItem(UUID.randomUUID(), queueName, request.sourceId(), sequenceNo, request.itemType(), payloadJson, headersJson, request.availableAt() == null ? now : request.availableAt(), request.maxAttempts() == null ? settings.defaultMaxAttempts() : request.maxAttempts(), blankToNull(request.idempotencyKey()), now);
+        notifyWorkAvailable(queueName, QueueWakeupReason.ENQUEUE);
         return toEnqueueResponse(item);
     }
 
@@ -483,6 +505,7 @@ public class DefaultQueueService implements QueueOperations {
         QueueItemRow updated = repository.adminStatus(item.itemId(), targetStatus, now, now);
         repository.releaseSource(item.queueName(), item.sourceId(), now);
         insertAudit(actorId, operation, item.queueName(), item.sourceId(), item.itemId(), item.status().name(), updated.status().name(), reason, Map.of());
+        notifyWorkAvailable(item.queueName(), wakeupReason(operation));
         return toItemResponse(updated);
     }
 
@@ -583,6 +606,35 @@ public class DefaultQueueService implements QueueOperations {
         String metadataJson = writeJson(defaultMap(metadata));
         requireMaxBytes(metadataJson, settings.maxAdminMetadataBytes(), "adminMetadata", queueName, itemId);
         repository.insertAdminAudit(UUID.randomUUID(), now(), blankToNull(actorId), operation, queueName, sourceId, itemId, previousStatus, newStatus, blankToNull(reason), metadataJson);
+    }
+
+    /**
+     * Emits an optional in-transaction wake-up hint for newly claimable work.
+     */
+    private void notifyWorkAvailable(String queueName, QueueWakeupReason reason) {
+        if (queueNotifier == NoopQueueNotifier.INSTANCE) {
+            return;
+        }
+        if (connectionProvider == null) {
+            throw new QueueException(QueueException.INTERNAL_SERVER_ERROR, "queue notifier requires an active SQL connection provider");
+        }
+        try {
+            queueNotifier.notifyWorkAvailable(connectionProvider.currentConnection(), new QueueWakeupEvent(queueName, reason));
+        } catch (java.sql.SQLException e) {
+            throw new QueueException(QueueException.INTERNAL_SERVER_ERROR, "queue wake-up notification failed", e).withQueueName(queueName);
+        }
+    }
+
+    /**
+     * Maps audited admin operations to safe notification reasons.
+     */
+    private QueueWakeupReason wakeupReason(String operation) {
+        return switch (operation) {
+            case "retry" -> QueueWakeupReason.ADMIN_RETRY;
+            case "skip" -> QueueWakeupReason.ADMIN_SKIP;
+            case "cancel" -> QueueWakeupReason.ADMIN_CANCEL;
+            default -> throw new QueueException(QueueException.INTERNAL_SERVER_ERROR, "unsupported wake-up operation " + operation);
+        };
     }
 
     /**

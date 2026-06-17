@@ -25,8 +25,12 @@ public final class QueueCoreFactory {
     }
 
     public static QueueOperations create(DataSource dataSource, ObjectMapper objectMapper, QueueSettings settings) {
+        return create(dataSource, objectMapper, settings, NoopQueueNotifier.INSTANCE);
+    }
+
+    public static QueueOperations create(DataSource dataSource, ObjectMapper objectMapper, QueueSettings settings, QueueNotifier queueNotifier) {
         JdbcTransactionRunner transactions = new JdbcTransactionRunner(dataSource);
         PostgresQueueRepository repository = new PostgresQueueRepository(transactions);
-        return new DefaultQueueService(repository, transactions, new RetryPolicy(), objectMapper, Clock.systemUTC(), settings);
+        return new DefaultQueueService(repository, transactions, new RetryPolicy(), objectMapper, Clock.systemUTC(), settings, queueNotifier, transactions);
     }
 }

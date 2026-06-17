@@ -79,6 +79,10 @@ public final class QueueWorkerEngine<I, R> implements AutoCloseable {
         return true;
     }
 
+    public String queueName() {
+        return queueName;
+    }
+
     public void stop() {
         running = false;
     }

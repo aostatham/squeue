@@ -15,9 +15,12 @@ import com.sequencedqueue.worker.QueueWorkerEngine.HeartbeatCommand;
 
 public final class SequencedQueueDirectWorker implements AutoCloseable {
     private final QueueWorkerEngine<ClaimItem, DirectQueueResult> engine;
+    private final DirectWorkerWaitStrategy.Waiter waiter;
+    private volatile boolean running = true;
 
     private SequencedQueueDirectWorker(Builder builder) {
         DirectWorkerTransport transport = new ClientDirectWorkerTransport(builder.client);
+        this.waiter = builder.waitStrategy == null ? null : builder.waitStrategy.open(builder.client.dataSource());
         this.engine = engine(
             transport,
             QueueWorkerEngine.scheduledLeaseMonitorFactory(transport),
@@ -38,6 +41,7 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
         int leaseSeconds,
         Map<String, Function<ClaimItem, DirectQueueResult>> handlers
     ) {
+        this.waiter = null;
         this.engine = engine(transport, leaseMonitorFactory, queueName, workerId, supportedItemTypes, leaseSeconds, handlers);
     }
 
@@ -68,7 +72,25 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
     }
 
     public void runForever() {
-        engine.runForever();
+        if (waiter == null) {
+            engine.runForever();
+            return;
+        }
+        while (running && !Thread.currentThread().isInterrupted()) {
+            try {
+                while (running && engine.runOnce()) {
+                    // Drain currently available work using the normal claim path before waiting.
+                }
+                if (running) {
+                    waiter.waitForWork(engineQueueName());
+                }
+            } catch (RuntimeException e) {
+                if (!running || Thread.currentThread().isInterrupted()) {
+                    return;
+                }
+                throw e;
+            }
+        }
     }
 
     public boolean runOnce() {
@@ -76,7 +98,11 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
     }
 
     public void stop() {
+        running = false;
         engine.stop();
+        if (waiter != null) {
+            waiter.close();
+        }
     }
 
     @Override
@@ -91,6 +117,7 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
         private int leaseSeconds = 60;
         private final List<String> supportedItemTypes = new ArrayList<>();
         private final Map<String, Function<ClaimItem, DirectQueueResult>> handlers = new HashMap<>();
+        private DirectWorkerWaitStrategy waitStrategy;
 
         private Builder(SequencedQueueDirectClient client, String queueName) {
             this.client = client;
@@ -118,6 +145,11 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
             return this;
         }
 
+        public Builder waitStrategy(DirectWorkerWaitStrategy waitStrategy) {
+            this.waitStrategy = waitStrategy;
+            return this;
+        }
+
         public SequencedQueueDirectWorker build() {
             if (workerId == null || workerId.isBlank()) {
                 throw new IllegalArgumentException("workerId is required");
@@ -127,6 +159,10 @@ public final class SequencedQueueDirectWorker implements AutoCloseable {
             }
             return new SequencedQueueDirectWorker(this);
         }
+    }
+
+    private String engineQueueName() {
+        return engine.queueName();
     }
 }
 

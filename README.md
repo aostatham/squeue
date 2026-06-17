@@ -84,6 +84,7 @@ All supported access paths must continue to delegate queue semantics to `sequenc
 - [Versioning and Schema Compatibility](docs/versioning.md)
 - [Canonical Semantics](docs/semantics.md)
 - [Security and Database Privileges](docs/security.md)
+- [Direct PostgreSQL Notify Wake-Up](docs/direct-postgres-notify.md)
 - [Changelog](CHANGELOG.md)
 - [Release Checklist](RELEASE_CHECKLIST.md)
 - [Known Issues and Simplification Follow-ups](docs/ISSUES.md)
@@ -614,6 +615,8 @@ schema version lookup
 Oversized direct-client fields are rejected as `QueueFieldTooLargeException`, which exposes `fieldName`, `maxBytes`, and `actualBytes` without exposing the oversized content.
 
 The direct worker helper uses short core transactions for claim and complete/fail. User handler code runs outside database transactions.
+
+Direct Java workers can optionally use PostgreSQL `LISTEN/NOTIFY` to avoid inefficient hot polling. This is a wake-up hint only; queue tables remain the durable source of truth and workers still claim through normal core claim logic. See [Direct PostgreSQL Notify Wake-Up](docs/direct-postgres-notify.md).
 
 ---
 
